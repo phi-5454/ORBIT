@@ -1,0 +1,9 @@
+lr: 1e-3
+hidden_dim: 64
+batch_size: 32
+latent_nodes: 32
+fsq_mu_levels: [5, 4, 4, 3, 3, 3, 2, 2]
+fsq_alpha_levels: [1024]
+window_particles: 256
+num_heads: 4
+num_layers: 2

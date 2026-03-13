@@ -1,0 +1,13 @@
+defaults:
+  - hyperparams: default_hyperparams.yaml
+
+run_name: "test_run"
+wandb_env: "../wandb_api_key.env"
+train_val_files: "./pq_files_train_val.txt"
+test_files: "./pq_files_test.txt"
+num_train_val_files: -1
+num_test_files: -1
+train_val_split: [0.80, 0.20]
+fast_dev_run: False
+run_validation: True
+run_test: False
