@@ -7,7 +7,7 @@ import torch.nn.functional as F
 from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data import DataLoader, IterableDataset
 
-# This is a bit farouche
+# TODO: This is a bit farouche
 feature_cols = ["L1T_PUPPIPart_Eta", "L1T_PUPPIPart_Phi", "L1T_PUPPIPart_PT"]
 
 

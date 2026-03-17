@@ -146,21 +146,35 @@ class PhysicsEvaluator:
 
 
 class PHA_FSQ_VAE(L.LightningModule):
-    def __init__(self, input_dim=3, hidden_dim=64, lr=1e-3):
+    def __init__(self, model_cfg):
         super().__init__()
         self.save_hyperparameters()
 
+        dim_mu = len(model_cfg["fsq_mu_levels"])
+        dim_alpha = len(model_cfg["fsq_alpha_levels"])
+
+        dim_quantized = dim_mu + dim_alpha
+        in_ch = model_cfg["input_dim"]
+        hidden_dim = model_cfg["hidden_dim"]
+        latent_nodes = model_cfg["latent_nodes"]
+
         self.encoder = tm.ParticleSetEncoder(
-            in_channels=3, hidden_dim=64, latent_nodes=32, out_channels=9
+            in_channels=in_ch,
+            hidden_dim=hidden_dim,
+            latent_nodes=latent_nodes,
+            out_channels=dim_quantized,
         )
-        self.phi = tm.Phi(dim_in=9, dim_alpha=1, dim_mu=8)
+        self.phi = tm.Phi(dim_in=dim_quantized, dim_alpha=dim_alpha, dim_mu=dim_mu)
 
-        self.quantizer_mu = tm.FSQ(levels=[5, 4, 4, 3, 3, 3, 2, 2])
-        self.quantizer_alpha = tm.FSQ(levels=[1024])
+        self.quantizer_mu = tm.FSQ(levels=model_cfg["fsq_mu_levels"])
+        self.quantizer_alpha = tm.FSQ(levels=model_cfg["fsq_alpha_levels"])
 
-        self.psi = tm.Psi(dim_mu=8, dim_alpha=1, dim_out=9)
+        self.psi = tm.Psi(dim_mu=dim_mu, dim_alpha=dim_alpha, dim_out=dim_quantized)
         self.decoder = tm.ParticleSetDecoder(
-            latent_channels=9, hidden_dim=64, out_nodes=256, out_channels=3
+            latent_channels=dim_quantized,
+            hidden_dim=hidden_dim,
+            out_nodes=model_cfg["window_particles"],
+            out_channels=in_ch,
         )
 
         self.evaluator = PhysicsEvaluator()
@@ -168,7 +182,9 @@ class PHA_FSQ_VAE(L.LightningModule):
     def configure_optimizers(self):
         # Tip: AdamW (with weight decay) is vastly superior to Adam for Transformers
         optimizer = torch.optim.AdamW(
-            self.parameters(), lr=self.hparams.lr, weight_decay=1e-4
+            self.parameters(),
+            lr=self.hparams.model_cfg["lr"],
+            weight_decay=self.hparams.model_cfg["weight_decay"],
         )
 
         # Warmup Phase:
@@ -293,7 +309,7 @@ class PHA_FSQ_VAE(L.LightningModule):
         x, mask = batch
 
         loss_pha, loss_l2, loss_abs, loss_commit, loss_amp, x_hat = self.compute_losses(
-            x, mask, beta=0.25
+            x, mask, beta=self.hparams.model_cfg["commit_beta"]
         )
 
         # Logging

@@ -1,5 +1,5 @@
 # Example sweep config
-program: main.py
+program: src/main.py
 method: bayes
 metric:
   name: val_loss

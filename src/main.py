@@ -26,8 +26,7 @@ def main(cfg: DictConfig):
     RESOURCE_DIR = BASE_DIR / "resources"
 
     # Hydra config to a python dict
-    config = OmegaConf.to_container(cfg, resolve=True) or {}
-    # print(config_dict)
+    config = OmegaConf.to_container(cfg, resolve=True, throw_on_missing=True) or {}
     assert isinstance(config, dict), f"Could not convert OmegaConf to a dict."
 
     # environemnt setup
