@@ -3,6 +3,7 @@ import lightning as L
 import numpy as np
 import pyarrow.dataset as ds
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data import DataLoader, IterableDataset
@@ -10,6 +11,41 @@ from torch.utils.data import DataLoader, IterableDataset
 # TODO: This is a bit farouche
 feature_cols = ["L1T_PUPPIPart_Eta", "L1T_PUPPIPart_Phi", "L1T_PUPPIPart_PT"]
 
+# For quantizing inputs
+class UniformQuantizerSTE(nn.Module):
+    def __init__(self, bit_depth: int, lsb: float = 1/500, signed: bool = True):
+        super().__init__()
+        self.bit_depth = bit_depth
+        self.lsb = lsb
+        self.signed = signed
+        
+        # Calculate the allowable integer ranges based on bit depth
+        # Two's complement
+        if self.signed:
+            # e.g., 8-bit signed: -128 to 127
+            self.q_min = -(2 ** (self.bit_depth - 1))
+            self.q_max = (2 ** (self.bit_depth - 1)) - 1
+        # Simple unsigned binary representation
+        else:
+            # e.g., 8-bit unsigned: 0 to 255
+            self.q_min = 0
+            self.q_max = (2 ** self.bit_depth) - 1
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # 1. Scale to the integer domain
+        x_scaled = x / self.lsb
+        
+        # 2. Round to nearest integer
+        x_rounded = torch.round(x_scaled)
+        print(x_rounded)
+        # 3. Clamp (clip) to the maximum/minimum allowable bit depth values
+        x_clamped = torch.clamp(x_rounded, self.q_min, self.q_max)
+        
+        # 4. Scale back to the physical physics domain
+        x_quantized = x_clamped * self.lsb
+        
+        # Straight-through estimator
+        return x + (x_quantized - x).detach()
 
 class PreprocessTranformer:
     def __init__(self, log_column_name, feature_names, epsilon=1e-8):
