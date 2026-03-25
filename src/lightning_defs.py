@@ -2,147 +2,13 @@ import os
 
 import lightning as L
 import matplotlib.pyplot as plt
-import numpy as np
-import seaborn as sns
 import torch
 import torch.nn.functional as F
 from torch.optim.lr_scheduler import LinearLR
 
+from eval_metrics import PhysicsEvaluator
 import torch_modules as tm
 import wandb
-
-
-# Model evaluation
-# TODO: Move to separate file
-class PhysicsEvaluator:
-    def __init__(self, feature_names=["Eta", "Phi", "pT (log)"]):
-        self.feature_names = feature_names
-
-    def evaluate_reconstruction(self, x, x_hat, mask):
-        """
-        Takes raw tensors, filters out padding, and returns a dict of metrics and figures.
-        """
-        results = {}
-
-        # 1. Apply the mask! Extract only the REAL particles.
-        # Shape goes from [Batch, 256, 3] -> [Total_Real_Particles, 3]
-        x_real = x[mask]
-        x_hat_real = x_hat[mask]
-
-        # 2. Calculate true physical MSE per feature
-        mse_per_feature = F.mse_loss(x_hat_real, x_real, reduction="none").mean(dim=0)
-
-        # Log the numeric metrics
-        for i, name in enumerate(self.feature_names):
-            results[f"metrics/mse_{name.replace(' ', '_')}"] = mse_per_feature[i].item()
-
-        # Convert to NumPy for plotting
-        x_np = x_real.cpu().numpy()
-        x_hat_np = x_hat_real.cpu().numpy()
-
-        # ==========================================
-        # FIGURE 1: Kinematic Features
-        # ==========================================
-        fig1, axes = plt.subplots(1, 3, figsize=(18, 5))
-        fig1.suptitle("FSQ-VAE: Original vs. Reconstructed Features", fontsize=16)
-
-        for i in range(3):
-            # Plot Original
-            sns.histplot(
-                x_np[:, i],
-                bins=50,
-                color="blue",
-                alpha=0.5,
-                label="Original",
-                kde=False,
-                stat="density",
-                ax=axes[i],
-            )
-            # Plot Reconstructed
-            sns.histplot(
-                x_hat_np[:, i],
-                bins=50,
-                color="orange",
-                alpha=0.5,
-                label="Reconstructed",
-                kde=False,
-                stat="density",
-                ax=axes[i],
-            )
-
-            axes[i].set_title(
-                f"{self.feature_names[i]} (MSE: {mse_per_feature[i]:.4f})"
-            )
-            axes[i].legend()
-
-        plt.tight_layout()
-        results["plots/kinematics"] = fig1  # Save Figure 1
-
-        # ==========================================
-        # FIGURE 2: Energy / Momentum (Mass assuming m=0)
-        # ==========================================
-        fig2, axs = plt.subplots(1, 2, figsize=(16, 5))
-
-        # Assuming indices: 0 = Eta, 1 = Phi, 2 = log(pT)
-        # We MUST use np.exp() on column 2 to get physical pT before calculating E = pT * cosh(eta)
-        pt_orig = np.exp(x_np[:, 2])
-        pt_reco = np.exp(x_hat_np[:, 2])
-
-        energy_orig = pt_orig * np.cosh(x_np[:, 0])
-        energy_reco = pt_reco * np.cosh(x_hat_np[:, 0])
-
-        min_val = max(min(energy_orig.min(), energy_reco.min()), 1e-8)
-        max_val = max(energy_orig.max(), energy_reco.max())
-        log_bins = np.logspace(np.log10(min_val), np.log10(max_val), num=50)
-
-        # Plot 1: Energy Distribution
-        axs[0].set_title(
-            "FSQ-VAE: Original vs. Reconstructed Energy (m=0)", fontsize=14
-        )
-        sns.histplot(
-            energy_orig,
-            bins=log_bins,
-            color="blue",
-            alpha=0.5,
-            label="Original",
-            kde=False,
-            stat="density",
-            ax=axs[0],
-        )
-        sns.histplot(
-            energy_reco,
-            bins=log_bins,
-            color="orange",
-            alpha=0.5,
-            label="Reconstructed",
-            kde=False,
-            stat="density",
-            ax=axs[0],
-        )
-        axs[0].set_xscale("log")
-        axs[0].legend()
-
-        # Plot 2: Residuals (Reco - Orig)
-        # We calculate MSE of the physical energy to display in the title
-        energy_mse = np.mean((energy_reco - energy_orig) ** 2)
-
-        axs[1].set_title(
-            f"Residuals: E_reco - E_original (MSE: {energy_mse:.2f})", fontsize=14
-        )
-        sns.histplot(
-            energy_reco - energy_orig,
-            bins=50,
-            color="green",
-            alpha=0.5,
-            kde=False,
-            stat="density",
-            ax=axs[1],
-        )
-
-        plt.tight_layout()
-        results["plots/energy_residuals"] = fig2  # Save Figure 2
-
-        return results
 
 
 class PHA_FSQ_VAE(L.LightningModule):
@@ -222,6 +88,8 @@ class PHA_FSQ_VAE(L.LightningModule):
         loss_pha = loss_abs + (beta * loss_commitment) + loss_amplitude
 
         return loss_pha, loss_l2, loss_abs, loss_commitment, loss_amplitude, x_hat
+
+
 
     # WELD: Added the missing forward method orchestrating the split latent space
     def forward(self, x, mask):
@@ -360,6 +228,7 @@ class PHA_FSQ_VAE(L.LightningModule):
             return
         # Pass the test sample and tell the router to use the "test" prefix
         self._evaluate_and_log(getattr(self, "val_sample", None), prefix="val")
+        self._evaluate_and_log(getattr(self, "jet_reco", None), prefix="val")
 
     def on_test_epoch_end(self):
         # Pass the test sample and tell the router to use the "test" prefix

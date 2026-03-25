@@ -22,11 +22,11 @@ class TrainPipeline:
     def __init__(self, config, train_files=[], val_files=[], test_files=[]) -> None:
         self.config = config
 
-        self.train_datamodule = ParquetDataModule(train_files)
+        self.train_datamodule = ParquetDataModule(train_files, window_particles=config["model"]["window_particles"])
         if self.config["run_validation"]:
-            self.val_datamodule = ParquetDataModule(val_files)
+            self.val_datamodule = ParquetDataModule(val_files, window_particles=config["model"]["window_particles"])
         if self.config["run_test"]:
-            self.test_datamodule = ParquetDataModule(test_files)
+            self.test_datamodule = ParquetDataModule(test_files, window_particles=config["model"]["window_particles"])
 
         # TODO: We assume we want to log with WandB.
         self.logger = L.pytorch.loggers.WandbLogger(
@@ -41,7 +41,6 @@ class TrainPipeline:
 
         # Initialize Trainer
         self.trainer = L.Trainer(
-            # max_epochs=10,
             logger=self.logger,
             callbacks=[lr_monitor],
             **config["trainer"],

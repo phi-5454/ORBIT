@@ -112,6 +112,7 @@ class ParquetFeatureDataset(IterableDataset):
                 coords[:, 2] = np.log(coords[:, 2] + 1e-8)
 
                 # Enforce the maximum particles limit
+                # TODO: Split the event into many smaller if exceed max. particle count
                 coords = coords[: self.max_particles]
                 event_tensors.append(torch.tensor(coords))
 
@@ -135,25 +136,26 @@ class ParquetFeatureDataset(IterableDataset):
 
 
 class ParquetDataModule(L.LightningDataModule):
-    def __init__(self, parquet_dir, features=feature_cols):
+    def __init__(self, parquet_dir, features=feature_cols, window_particles=256):
         super().__init__()
         self.parquet_dir = parquet_dir
         self.features = features
+        self.window_particles = window_particles
 
     def train_dataloader(self):
-        dataset = ParquetFeatureDataset(self.parquet_dir, self.features)
+        dataset = ParquetFeatureDataset(self.parquet_dir, self.features, self.window_particles)
         # Note: If num_workers > 0 on IterableDataset, you need a custom worker_init_fn
         # to prevent data duplication. Kept at 0 for safe out-of-the-box running.
         return DataLoader(dataset, batch_size=None, num_workers=0)
 
     def val_dataloader(self):
-        dataset = ParquetFeatureDataset(self.parquet_dir, self.features)
+        dataset = ParquetFeatureDataset(self.parquet_dir, self.features, self.window_particles)
         # Note: If num_workers > 0 on IterableDataset, you need a custom worker_init_fn
         # to prevent data duplication. Kept at 0 for safe out-of-the-box running.
         return DataLoader(dataset, batch_size=None, num_workers=0)
 
     def test_dataloader(self):
-        dataset = ParquetFeatureDataset(self.parquet_dir, self.features)
+        dataset = ParquetFeatureDataset(self.parquet_dir, self.features, self.window_particles)
         # Note: If num_workers > 0 on IterableDataset, you need a custom worker_init_fn
         # to prevent data duplication. Kept at 0 for safe out-of-the-box running.
         return DataLoader(dataset, batch_size=None, num_workers=0)
