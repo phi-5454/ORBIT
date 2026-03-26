@@ -15,7 +15,7 @@ import wandb
 from data_loading import ParquetDataModule, feature_cols
 from lightning_defs import PHA_FSQ_VAE
 from torch_modules import *
-
+from lightning.pytorch.callbacks import ModelSummary
 
 class TrainPipeline:
     # TODO: handle all the params
@@ -42,7 +42,7 @@ class TrainPipeline:
         # Initialize Trainer
         self.trainer = L.Trainer(
             logger=self.logger,
-            callbacks=[lr_monitor],
+            callbacks=[lr_monitor, ModelSummary(max_depth=-1)],
             **config["trainer"],
         )
 
@@ -54,7 +54,7 @@ class TrainPipeline:
         # Initialize Model
         # model = PHA_FSQ_VAE(input_dim=3, hidden_dim=64, lr=1e-3)
         model_cfg = self.config["model"]
-        model_cfg["input_dim"] = len(feature_cols)
+        model_cfg["input_dim"] = 3 # TODO: automate this 
         model = PHA_FSQ_VAE(model_cfg)
         # model = PHA_FSQ_VAE(
         # input_dim=len(feature_cols),

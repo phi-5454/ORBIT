@@ -1,4 +1,3 @@
-import keras
 import lightning as L
 import numpy as np
 import pyarrow.dataset as ds
@@ -9,7 +8,7 @@ from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data import DataLoader, IterableDataset
 
 # TODO: This is a bit farouche
-feature_cols = ["L1T_PUPPIPart_Eta", "L1T_PUPPIPart_Phi", "L1T_PUPPIPart_PT"]
+feature_cols = ["L1T_PUPPIPart_Eta", "L1T_PUPPIPart_Phi", "L1T_PUPPIPart_PT", "L1T_PUPPIPart_PID", "L1T_PUPPIPart_PuppiW"]
 
 # For quantizing inputs
 class UniformQuantizerSTE(nn.Module):
@@ -37,7 +36,6 @@ class UniformQuantizerSTE(nn.Module):
         
         # 2. Round to nearest integer
         x_rounded = torch.round(x_scaled)
-        print(x_rounded)
         # 3. Clamp (clip) to the maximum/minimum allowable bit depth values
         x_clamped = torch.clamp(x_rounded, self.q_min, self.q_max)
         
@@ -48,11 +46,13 @@ class UniformQuantizerSTE(nn.Module):
         return x + (x_quantized - x).detach()
 
 class PreprocessTranformer:
-    def __init__(self, log_column_name, feature_names, epsilon=1e-8):
-        self.col_name = log_column_name
+    # TODO: Integrate the PUPPI_weight cut
+    # TODO: This is all hardcoded for now
+    def __init__(self, epsilon=1e-8):
         self.epsilon = epsilon
+        self.col_name = "L1T_PUPPIPart_PT"
         # Find the integer index of the transformed column for tensor operations later
-        self.col_idx = feature_names.index(log_column_name) if log_column_name else None
+        self.col_idx = feature_cols.index(self.col_name) if self.col_name else None
 
     # TODO: trasnform to realistic bit depth.
     def truncate_quantize(self, df):
@@ -60,20 +60,33 @@ class PreprocessTranformer:
         pass
 
     def forward_dataframe(self, df):
+
+
         """Applies the forward transform to the Pandas DataFrame before training."""
-        if self.col_name and self.col_name in df.columns:
-            df[self.col_name] = np.log(df[self.col_name] + self.epsilon)
+        #if self.col_name and self.col_name in df.columns:
+
+        # Apply same transforms as OmniJet
+        df["L1T_PUPPIPart_PT"] = df["L1T_PUPPIPart_PT"].apply(
+                lambda x: np.log(np.asarray(x) + self.epsilon) - 1.8
+                )
+        df["L1T_PUPPIPart_Phi"] = df["L1T_PUPPIPart_Phi"] / np.pi
+        df["L1T_PUPPIPart_Eta"] = df["L1T_PUPPIPart_Eta"] / 3
+
         return df
 
     def inverse_tensor(self, tensor):
         """Applies the inverse transform to the PyTorch prediction tensor."""
-        if self.col_idx is not None:
-            # Create a clone to avoid in-place modification issues during backprop
-            tensor_inv = tensor.clone()
-            tensor_inv[:, self.col_idx] = (
-                torch.exp(tensor[:, self.col_idx]) - self.epsilon
-            )
-            return tensor_inv
+        # Create a clone to avoid in-place modification issues during backprop
+        tensor_inv = tensor.clone()
+        tensor_inv[..., 2] = (
+            torch.exp(tensor[..., 2]) - self.epsilon + 1.8
+        )
+        tensor_inv[..., 0] = tensor[..., 0] * 3
+        # Azimuthal angle, Modulo 2pi
+        tensor_inv[..., 1] = (tensor[..., 1] * torch.pi + torch.pi) % (2 * torch.pi) - torch.pi
+        
+        return tensor_inv
+
         return tensor
 
 
@@ -93,23 +106,29 @@ class ParquetFeatureDataset(IterableDataset):
         for batch in batches:
             # Convert to Pandas. Each cell now contains a numpy array of particles.
             df = batch.to_pandas()
+            df = PreprocessTranformer().forward_dataframe(df)
 
             event_tensors = []
 
+            PUPPI_cutoff = 0.05
+
             # Zip the columns. This iterates row-by-row (event-by-event)
-            for eta_arr, phi_arr, pt_arr in zip(
-                df[self.features[0]], df[self.features[1]], df[self.features[2]]
+            # TODO: PID
+            for eta_arr, phi_arr, pt_arr, pid_arr, puppiw_arr in zip(
+                df[self.features[0]], df[self.features[1]], df[self.features[2]], df[self.features[3]], df[self.features[4]] 
             ):
+                PUPPI_mask = puppiw_arr > PUPPI_cutoff
+
 
                 # Skip empty events (e.g., zero particles passed the trigger)
                 if len(eta_arr) == 0:
                     continue
 
                 # Stack the 1D arrays into a [N, 3] matrix for this specific event
-                coords = np.column_stack([eta_arr, phi_arr, pt_arr]).astype(np.float32)
+                coords = np.column_stack([eta_arr[PUPPI_mask], phi_arr[PUPPI_mask], pt_arr[PUPPI_mask]]).astype(np.float32)
 
                 # Apply Log transform safely directly to the PT column (Index 2)
-                coords[:, 2] = np.log(coords[:, 2] + 1e-8)
+                # coords[:, 2] = np.log(coords[:, 2] + 1e-8)
 
                 # Enforce the maximum particles limit
                 # TODO: Split the event into many smaller if exceed max. particle count

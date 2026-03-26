@@ -14,6 +14,7 @@ import wandb
 class PHA_FSQ_VAE(L.LightningModule):
     def __init__(self, model_cfg):
         super().__init__()
+        self.model_cfg = model_cfg
         self.save_hyperparameters()
 
         dim_mu = len(model_cfg["fsq_mu_levels"])
@@ -71,24 +72,40 @@ class PHA_FSQ_VAE(L.LightningModule):
             },
         }
 
-    def compute_losses(self, x, mask, beta=0.25):
-        x_hat, z_mu, z_hat_mu, z_alpha, z_hat_alpha = self(x, mask)
+    def compute_losses(self, x, mask, beta=0.25, phi_idx=1):
+            """
+            Calculates losses while respecting the periodicity of the phi angle.
+            Assuming x shape is [Batch, Particles, Features] and phi is at phi_idx.
+            """
+            x_hat, z_mu, z_hat_mu, z_alpha, z_hat_alpha = self(x, mask)
+            
+            mask_3d = mask.unsqueeze(-1).expand_as(x)
 
-        mask_3d = mask.unsqueeze(-1).expand_as(x)
+            # 1. Calculate the raw difference
+            diff = x_hat - x
 
-        loss_abs_full = F.l1_loss(x_hat, x, reduction="none")
-        loss_abs = (loss_abs_full * mask_3d).sum() / mask_3d.sum().clamp(min=1.0)
+            # 2. Wrap the periodic feature phi. Here, rescaled to [-1, 1] 
+            # CRITICAL: We use .clone() here before slice assignment to prevent 
+            # PyTorch from throwing an "in-place operation" Autograd error!
+            diff_wrapped = diff.clone()
+            diff_wrapped[..., phi_idx] = (diff[..., phi_idx] + 1) % (2 * 1) - 1
 
-        loss_l2_full = F.mse_loss(x_hat, x, reduction="none")
-        loss_l2 = (loss_l2_full * mask_3d).sum() / mask_3d.sum().clamp(min=1.0)
+            # 3. Calculate the actual feature losses using the wrapped difference
+            loss_abs_full = torch.abs(diff_wrapped)
+            loss_l2_full = diff_wrapped ** 2  # Equivalent to F.mse_loss under the hood
 
-        loss_commitment = F.mse_loss(z_mu, z_hat_mu.detach())
-        loss_amplitude = F.mse_loss(z_alpha, z_hat_alpha.detach())
+            # 4. Apply the mask and mean (unchanged from your original code)
+            loss_abs = (loss_abs_full * mask_3d).sum() / mask_3d.sum().clamp(min=1.0)
+            loss_l2 = (loss_l2_full * mask_3d).sum() / mask_3d.sum().clamp(min=1.0)
 
-        loss_pha = loss_abs + (beta * loss_commitment) + loss_amplitude
+            # 5. Calculate latent losses (unchanged)
+            loss_commitment = F.mse_loss(z_mu, z_hat_mu.detach())
+            loss_amplitude = F.mse_loss(z_alpha, z_hat_alpha.detach())
 
-        return loss_pha, loss_l2, loss_abs, loss_commitment, loss_amplitude, x_hat
+            # 6. Total loss
+            loss_pha = loss_abs + (beta * loss_commitment) + loss_amplitude
 
+            return loss_pha, loss_l2, loss_abs, loss_commitment, loss_amplitude, x_hat
 
 
     # WELD: Added the missing forward method orchestrating the split latent space
@@ -100,15 +117,22 @@ class PHA_FSQ_VAE(L.LightningModule):
         z_mu, z_alpha = self.phi(z_encoded)
 
         # 3. Quantize
-        z_hat_mu = self.quantizer_mu(z_mu)
-        z_hat_alpha = self.quantizer_alpha(z_alpha)
+        if(self.model_cfg["skip_quantization"]==True):
+            z_hat_mu = self.quantizer_mu(z_mu)
+            z_hat_alpha = self.quantizer_alpha(z_alpha)
 
-        # 4. Straight Through Estimator (STE)
-        z_ste_mu = z_mu + (z_hat_mu - z_mu).detach()
-        z_ste_alpha = z_alpha + (z_hat_alpha - z_alpha).detach()
+            z_decoded = z_encoded
+        else:
+            z_hat_mu = self.quantizer_mu(z_mu)
+            z_hat_alpha = self.quantizer_alpha(z_alpha)
 
-        # 5. Merge and Decode
-        z_decoded = self.psi(z_ste_mu, z_ste_alpha)
+            # 4. Straight Through Estimator (STE)
+            z_ste_mu = z_mu + (z_hat_mu - z_mu).detach()
+            z_ste_alpha = z_alpha + (z_hat_alpha - z_alpha).detach()
+
+            # 5. Merge and Decode
+            z_decoded = self.psi(z_ste_mu, z_ste_alpha)
+
         x_hat = self.decoder(z_decoded)
 
         return x_hat, z_mu, z_hat_mu, z_alpha, z_hat_alpha
@@ -133,7 +157,7 @@ class PHA_FSQ_VAE(L.LightningModule):
                 if isinstance(self.logger, L.pytorch.loggers.WandbLogger):
                     self.logger.experiment.log(
                         {f"{prefix}_plots/{key}": wandb.Image(fig)},
-                        step=self.global_step,
+                        #step=self.global_step,
                     )
 
                 elif isinstance(self.logger, L.pytorch.loggers.TensorBoardLogger):
@@ -147,6 +171,17 @@ class PHA_FSQ_VAE(L.LightningModule):
                     )
 
                 plt.close(fig)
+
+    def on_fit_start(self) -> None:
+        super().on_fit_start()
+        """
+        Triggered automatically right before the first training epoch.
+        This ensures the model is fully initialized and the logger is attached.
+        """
+        # 1. Verify we actually have a WandB logger attached
+        if self.logger is None or not isinstance(self.logger, L.pytorch.loggers.WandbLogger):
+            return
+
 
     def training_step(self, batch, batch_idx):
         # WELD: Unpack the yielded tuple
@@ -226,10 +261,12 @@ class PHA_FSQ_VAE(L.LightningModule):
     def on_validation_epoch_end(self):
         if self.trainer.sanity_checking:
             return
+
         # Pass the test sample and tell the router to use the "test" prefix
         self._evaluate_and_log(getattr(self, "val_sample", None), prefix="val")
         self._evaluate_and_log(getattr(self, "jet_reco", None), prefix="val")
 
     def on_test_epoch_end(self):
+
         # Pass the test sample and tell the router to use the "test" prefix
         self._evaluate_and_log(getattr(self, "test_sample", None), prefix="test")

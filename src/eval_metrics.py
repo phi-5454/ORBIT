@@ -6,10 +6,13 @@ import torch.nn.functional as F
 import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
+import torch
+
+from data_loading import PreprocessTranformer
 
 # Model evaluation
 class PhysicsEvaluator:
-    def __init__(self, feature_names=["Eta", "Phi", "pT (log)"]):
+    def __init__(self, feature_names=["Eta", "Phi", "pT(log)"]):
         self.feature_names = feature_names
 
     def evaluate_reconstruction(self, x, x_hat, mask):
@@ -17,6 +20,11 @@ class PhysicsEvaluator:
         Takes raw tensors, filters out padding, and returns a dict of metrics and figures.
         """
         results = {}
+
+        # TODO: P_t_LOG -> P_t!!!
+        # Apply inverse transform
+        x = PreprocessTranformer().inverse_tensor(x)
+        x_hat = PreprocessTranformer().inverse_tensor(x_hat)
 
         # 1. Apply the mask! Extract only the REAL particles.
         # Shape goes from [Batch, 256, 3] -> [Total_Real_Particles, 3]
@@ -30,17 +38,19 @@ class PhysicsEvaluator:
         for i, name in enumerate(self.feature_names):
             results[f"metrics/mse_{name.replace(' ', '_')}"] = mse_per_feature[i].item()
         
-
         # Convert to NumPy for plotting
-        x_np = x.detach().cpu().numpy()
-        x_hat_np = x_hat.detach().cpu().numpy()
+        x_np = x_real.detach().cpu().numpy()
+        x_hat_np = x_hat_real.detach().cpu().numpy()
         mask_np = mask.detach().cpu().numpy()
+
+        x_np_tuple = x.detach().cpu().numpy()
+        x_hat_np_tuple = x_hat.detach().cpu().numpy()
 
         jet_reco = EventJetReconstructor(R=0.8, min_jet_pt=0.0)
         true_jet_pts = []
         reco_jet_pts = []
 
-        batch_size = x_np.shape[0]
+        batch_size = x_np_tuple.shape[0]
 
         # Iterate through the batch event-by-event
         for i in range(batch_size):
@@ -48,8 +58,8 @@ class PhysicsEvaluator:
             
             # Apply the mask to extract ONLY real particles for this specific event
             # (Assuming indices: 0=pt, 1=eta, 2=phi)
-            ev_x_pt, ev_x_eta, ev_x_phi = x_np[i, ev_mask, 0], x_np[i, ev_mask, 1], x_np[i, ev_mask, 2]
-            ev_xhat_pt, ev_xhat_eta, ev_xhat_phi = x_hat_np[i, ev_mask, 0], x_hat_np[i, ev_mask, 1], x_hat_np[i, ev_mask, 2]
+            ev_x_pt, ev_x_eta, ev_x_phi = x_np_tuple[i, ev_mask, 0], x_np_tuple[i, ev_mask, 1], x_np_tuple[i, ev_mask, 2]
+            ev_xhat_pt, ev_xhat_eta, ev_xhat_phi = x_hat_np_tuple[i, ev_mask, 0], x_hat_np_tuple[i, ev_mask, 1], x_hat_np_tuple[i, ev_mask, 2]
 
             # TODO: Make work for events that are split into many parts
             # Cluster the True and Reconstructed Jets
@@ -86,13 +96,15 @@ class PhysicsEvaluator:
             
             # Save the figure to your results dictionary so your router catches it
             results["plots/jet_pt_resolution"] = fig
+
         # ==========================================
         # FIGURE 1: Kinematic Features
         # ==========================================
         fig1, axes = plt.subplots(1, 3, figsize=(18, 5))
-        fig1.suptitle("FSQ-VAE: Original vs. Reconstructed Features", fontsize=16)
+        fig1.suptitle("FSQ-VAE: Original vs. Reconstructed Features (per-particle)", fontsize=16)
         
         for i in range(3):
+            # TODO: magic constants...
             # Plot Original
             sns.histplot(
                 x_np[:, i],
@@ -101,6 +113,7 @@ class PhysicsEvaluator:
                 alpha=0.5,
                 label="Original",
                 kde=False,
+                log_scale=(True if i==2 else None),
                 stat="density",
                 ax=axes[i],
             )
@@ -113,8 +126,12 @@ class PhysicsEvaluator:
                 label="Reconstructed",
                 kde=False,
                 stat="density",
+                log_scale=(True if i==2 else None),
                 ax=axes[i],
             )
+
+
+
 
             axes[i].set_title(
                 f"{self.feature_names[i]} (MSE: {mse_per_feature[i]:.4f})"
@@ -131,14 +148,18 @@ class PhysicsEvaluator:
 
         # Assuming indices: 0 = Eta, 1 = Phi, 2 = log(pT)
         # We MUST use np.exp() on column 2 to get physical pT before calculating E = pT * cosh(eta)
-        pt_orig = np.exp(x_np[:, 2])
-        pt_reco = np.exp(x_hat_np[:, 2])
+        #pt_orig = np.exp(x_np[:, 2])
+        #pt_reco = np.exp(x_hat_np[:, 2])
+        pt_orig = x_np[:, 2]
+        pt_reco = x_hat_np[:, 2]
 
         energy_orig = pt_orig * np.cosh(x_np[:, 0])
         energy_reco = pt_reco * np.cosh(x_hat_np[:, 0])
 
+
         min_val = max(min(energy_orig.min(), energy_reco.min()), 1e-8)
         max_val = max(energy_orig.max(), energy_reco.max())
+
         log_bins = np.logspace(np.log10(min_val), np.log10(max_val), num=50)
 
         # Plot 1: Energy Distribution

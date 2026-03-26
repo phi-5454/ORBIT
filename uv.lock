@@ -1106,6 +1106,31 @@ wheels = [
 ]
 
 [[package]]
+name = "mplhep"
+version = "1.1.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "matplotlib" },
+    { name = "mplhep-data" },
+    { name = "numpy" },
+    { name = "packaging" },
+    { name = "uhi" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/0d/1c/b5d43b8d42f3e91156d7bc1e0d6e5dfa82d36d85ae15d9ccb52f0e19881c/mplhep-1.1.2.tar.gz", hash = "sha256:d9f94248b1b0fa4a14b42876f838e91804c16331c933c5568ae4a9886c610781", size = 4186042, upload-time = "2026-02-26T22:40:07.363Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a5/10/699c0384f62dd1c4a20e628f772bfc5119865bd57c3b6674b5316f877bc8/mplhep-1.1.2-py3-none-any.whl", hash = "sha256:8afb8834631ef74ad7b7ec9d6c1a196ad879bc680cf89e8d38f669c00329c1c6", size = 96098, upload-time = "2026-02-26T22:40:03.744Z" },
+]
+
+[[package]]
+name = "mplhep-data"
+version = "0.0.5"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/ef/73/5009b9a8ffcc68a57c32503042398c390905dc229373b7902ab569d94727/mplhep_data-0.0.5.tar.gz", hash = "sha256:4e5c4eae3e423762eb3d4ad542060f1be7f122c18a17164f7fcfedcf943fac7d", size = 9128431, upload-time = "2025-10-20T14:12:59.724Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b0/6d/aed31732afe53a3c37d1172aef9e1a282106b47e5b0d06bd69b43b59380b/mplhep_data-0.0.5-py3-none-any.whl", hash = "sha256:1b88141a1b9e508845febff56b867fc60531e1d81f9464c468e830d63235abd4", size = 9131833, upload-time = "2025-10-20T14:12:56.092Z" },
+]
+
+[[package]]
 name = "mpmath"
 version = "1.3.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1531,6 +1556,7 @@ dependencies = [
     { name = "keras" },
     { name = "lightning" },
     { name = "matplotlib" },
+    { name = "mplhep" },
     { name = "pyarrow" },
     { name = "pylorentz" },
     { name = "seaborn" },
@@ -1546,6 +1572,7 @@ requires-dist = [
     { name = "keras", specifier = ">=3.13.2" },
     { name = "lightning", specifier = ">=2.6.1" },
     { name = "matplotlib", specifier = ">=3.10.8" },
+    { name = "mplhep", specifier = ">=1.1.2" },
     { name = "pyarrow", specifier = ">=23.0.1" },
     { name = "pylorentz", specifier = ">=0.3.3" },
     { name = "seaborn", specifier = ">=0.13.2" },
@@ -2300,6 +2327,18 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/5e/a7/c202b344c5ca7daf398f3b8a477eeb205cf3b6f32e7ec3a6bac0629ca975/tzdata-2025.3.tar.gz", hash = "sha256:de39c2ca5dc7b0344f2eba86f49d614019d29f060fc4ebc8a417896a620b56a7", size = 196772, upload-time = "2025-12-13T17:45:35.667Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/c7/b0/003792df09decd6849a5e39c28b513c06e84436a54440380862b5aeff25d/tzdata-2025.3-py2.py3-none-any.whl", hash = "sha256:06a47e5700f3081aab02b2e513160914ff0694bce9947d6b76ebd6bf57cfc5d1", size = 348521, upload-time = "2025-12-13T17:45:33.889Z" },
+]
+
+[[package]]
+name = "uhi"
+version = "1.0.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/6f/4c/846ed661a6454fcb3a27fc5f8d26f8170718d3fc85e784cf1b8b2718185e/uhi-1.0.0.tar.gz", hash = "sha256:331188949b1a49c8db9ef9d50b7c4d4df4606115d147ded97c4f050da8270e74", size = 43498, upload-time = "2025-08-20T20:19:15.868Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/33/83/b5be6755c33d1fa6df51dda11beb15bb4c873b66d9dc7b99aa011d4090c9/uhi-1.0.0-py3-none-any.whl", hash = "sha256:653e5b011aaeea0bede4feef5c4b4f3fe750277ab9c9f3d620f1a0acdc7ae740", size = 25330, upload-time = "2025-08-20T20:19:14.449Z" },
 ]
 
 [[package]]

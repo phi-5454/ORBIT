@@ -11,6 +11,7 @@ dependencies = [
     "keras>=3.13.2",
     "lightning>=2.6.1",
     "matplotlib>=3.10.8",
+    "mplhep>=1.1.2",
     "pyarrow>=23.0.1",
     "pylorentz>=0.3.3",
     "seaborn>=0.13.2",
