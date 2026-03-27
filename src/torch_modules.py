@@ -131,11 +131,11 @@ class ParticleSetDecoder(nn.Module):
 
 
 class NormformerEncoder(nn.Module):
-    def __init__(self, num_layers=4, model_dim=128, nhead=8, mpl_expansion_factor=4, dropout=0.1):
+    def __init__(self, num_layers=4, model_dim=128, nhead=8, mlp_expansion_factor=4, dropout=0.1):
         super().__init__()
         
         self.transformer_blocks = nn.ModuleList([
-            NormformerBlock(model_dim, nhead, dropout=dropout) for _ in range(num_layers)
+            NormformerBlock(model_dim, nhead, mlp_expansion_factor=mlp_expansion_factor, dropout=dropout) for _ in range(num_layers)
         ])
 
     def forward(self, x, mask=None):
@@ -150,12 +150,12 @@ class NormformerEncoder(nn.Module):
         return x
 
 class NormformerDecoder(nn.Module):
-    def __init__(self, num_layers=4, model_dim=128, nhead=8, mpl_expansion_factor=4, dropout=0.1):
+    def __init__(self, num_layers=4, model_dim=128, nhead=8, mlp_expansion_factor=4, dropout=0.1):
         super().__init__()
 
         # Symmetrical Transformer Blocks
         self.transformer_blocks = nn.ModuleList([
-            NormformerBlock(model_dim, nhead, dropout=dropout) for _ in range(num_layers)
+            NormformerBlock(model_dim, nhead, mlp_expansion_factor=mlp_expansion_factor, dropout=dropout) for _ in range(num_layers)
         ])
 
     def forward(self, z_quantized, mask=None):
