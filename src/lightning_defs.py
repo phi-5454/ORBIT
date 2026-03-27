@@ -34,7 +34,7 @@ class PHA_FSQ_VAE(L.LightningModule):
         self.latent_proj_out = tm.MLP(codebook_dim, hidden_dim, [2 * hidden_dim, 2*hidden_dim])
         self.output_proj = tm.MLP(hidden_dim, in_dim, [2 * hidden_dim, 2*hidden_dim])
 
-        self.encoder = tm.NormformerEncoder(num_layers=num_enc_dec_layers, model_dim=hidden_dim, nhead=num_heads, mpl_expansion_factor=nf_mlp_expansion_factor, dropout=nf_dropout)
+        self.encoder = tm.NormformerEncoder(num_layers=num_enc_dec_layers, model_dim=hidden_dim, nhead=num_heads, mlp_expansion_factor=nf_mlp_expansion_factor, dropout=nf_dropout)
         '''
         self.encoder = tm.ParticleSetEncoder(
             in_channels=in_dim,
@@ -61,7 +61,7 @@ class PHA_FSQ_VAE(L.LightningModule):
             out_channels=in_dim,
         )
         '''
-        self.decoder = tm.NormformerEncoder(num_layers=num_enc_dec_layers, model_dim=hidden_dim, nhead=num_heads, mpl_expansion_factor=nf_mlp_expansion_factor, dropout=nf_dropout)
+        self.decoder = tm.NormformerEncoder(num_layers=num_enc_dec_layers, model_dim=hidden_dim, nhead=num_heads, mlp_expansion_factor=nf_mlp_expansion_factor, dropout=nf_dropout)
 
         self.evaluator = PhysicsEvaluator()
 
