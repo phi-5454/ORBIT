@@ -19,7 +19,7 @@ class NormformerBlock(nn.Module):
             nn.GELU(),
             nn.Dropout(dropout),
             nn.Linear(dim_feedforward, d_model),
-            nn.Dropout(dropout)
+            nn.Dropout(dropout)  # Differs from paper
         )
         
         # Another "Specific Normformer" Addition:
@@ -57,6 +57,37 @@ class NormformerBlock(nn.Module):
         
         return x
 
+# From https://github.com/uhh-pd-ml/enhancing-ntp4jets/blob/main/gabbro/models/transformer.py
+class MLP(nn.Module):
+    """Simple MLP for embedding."""
+
+    def __init__(
+        self,
+        input_dim: int,
+        output_dim: int,
+        hidden_dims: list = None,
+        dropout_rate: float = 0.0,
+        activation: str = "GELU",
+    ):
+        super().__init__()
+        self.input_dim = input_dim
+        self.hidden_dims = hidden_dims
+        self.output_dim = output_dim
+        self.dropout_rate = dropout_rate
+        act_fn = eval(f"torch.nn.{activation}")()
+
+        dims = [self.input_dim] + list(self.hidden_dims) + [self.output_dim]
+        layers = []
+        for i in range(len(dims) - 1):
+            layers.append(nn.Linear(dims[i], dims[i + 1]))
+            if i < len(dims) - 2:
+                layers.append(act_fn)
+                layers.append(nn.Dropout(self.dropout_rate))
+        self.layers = nn.Sequential(*layers)
+
+    def forward(self, x):
+        return self.layers(x)
+
 class FSQ(nn.Module):
     def __init__(self, levels: list[int]):
         super().__init__()
@@ -93,8 +124,6 @@ class Phi(nn.Module):
         return z_mu, z_alpha
 
 
-
-
 class Psi(nn.Module):
     def __init__(self, dim_mu: int, dim_alpha: int, dim_out):
         super().__init__()
@@ -108,7 +137,6 @@ class Psi(nn.Module):
         z = torch.cat([z_mu, z_alpha], dim=-1)
         z = self.ff(z)
         return z
-
 
 
 
@@ -133,7 +161,7 @@ class MAB(nn.Module):
 
 
 class NormformerEncoder(nn.Module):
-    def __init__(self, input_dim=3, num_layers=4, model_dim=128, embed_dim=512, nhead=8):
+    def __init__(self, input_dim=3, num_layers=4, model_dim=128, embed_dim=512, nhead=8, dropout=0.1):
         super().__init__()
 
         # FIX 1: Grouped into a Sequential block with a GELU activation 
@@ -145,7 +173,7 @@ class NormformerEncoder(nn.Module):
         )
         
         self.transformer_blocks = nn.ModuleList([
-            NormformerBlock(model_dim, nhead) for _ in range(num_layers)
+            NormformerBlock(model_dim, nhead, dropout=dropout) for _ in range(num_layers)
         ])
 
     def forward(self, x, mask=None):
@@ -161,12 +189,12 @@ class NormformerEncoder(nn.Module):
         return x
 
 class NormformerDecoder(nn.Module):
-    def __init__(self, output_dim=3, num_layers=4, model_dim=128, embed_dim=512, nhead=8):
+    def __init__(self, output_dim=3, num_layers=4, model_dim=128, embed_dim=512, nhead=8, dropout=0.1):
         super().__init__()
 
         # Symmetrical Transformer Blocks
         self.transformer_blocks = nn.ModuleList([
-            NormformerBlock(model_dim, nhead) for _ in range(num_layers)
+            NormformerBlock(model_dim, nhead, dropout=dropout) for _ in range(num_layers)
         ])
         
         # Mirroring the step-down process back to the physical 3D kinematics

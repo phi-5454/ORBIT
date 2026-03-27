@@ -20,6 +20,9 @@ class FSQ(nn.Module):
 class Phi(nn.Module):
     def __init__(self, dim_in, dim_alpha: int, dim_mu: int):
         super().__init__()
+        self.mlp_alpha = MLP(dim_in, dim_alpha, [2 * dim_in, 2 * dim_in])
+        self.mlp_mu = MLP(dim_in, dim_mu, [2 * dim_in, 2* dim_in])
+
         self.ff_alpha = nn.Sequential(
             nn.Linear(dim_in, 2*dim_in),
             nn.GELU(),
@@ -33,8 +36,10 @@ class Phi(nn.Module):
 
     def forward(self, z):
         # WELD: Actually pass the data through the layers
-        z_alpha = self.ff_alpha(z)
-        z_mu = self.ff_mu(z)
+        #z_alpha = self.ff_alpha(z)
+        #z_mu = self.ff_mu(z)
+        z_alpha = self.mlp_alpha(z)
+        z_mu = self.mlp_mu(z)
         return z_mu, z_alpha
 
 
@@ -43,6 +48,7 @@ class Phi(nn.Module):
 class Psi(nn.Module):
     def __init__(self, dim_mu: int, dim_alpha: int, dim_out):
         super().__init__()
+        self.mlp = MLP(dim_mu + dim_alpha, dim_out, [(dim_mu + dim_alpha) * 2, (dim_mu + dim_alpha) * 2])
         self.ff = nn.Sequential(
             nn.Linear(dim_mu + dim_alpha, (dim_mu + dim_alpha) * 2),
             nn.GELU(),
@@ -52,7 +58,8 @@ class Psi(nn.Module):
     def forward(self, z_mu, z_alpha):
         # WELD: Replaced NumPy concat with PyTorch cat
         z = torch.cat([z_mu, z_alpha], dim=-1)
-        z = self.ff(z)
+        #z = self.ff(z)
+        z = self.mlp(z)
         return z
 
 
@@ -122,3 +129,132 @@ class ParticleSetDecoder(nn.Module):
 
         return self.to_physical(x)
 
+
+class NormformerEncoder(nn.Module):
+    def __init__(self, num_layers=4, model_dim=128, nhead=8, mpl_expansion_factor=4, dropout=0.1):
+        super().__init__()
+        
+        self.transformer_blocks = nn.ModuleList([
+            NormformerBlock(model_dim, nhead, dropout=dropout) for _ in range(num_layers)
+        ])
+
+    def forward(self, x, mask=None):
+        
+        # Invert the mask for PyTorch's Attention backend
+        # (Assuming your input mask has True for REAL particles)
+        attn_mask = ~mask if mask is not None else None
+        
+        for layer in self.transformer_blocks:
+            x = layer(x, mask=attn_mask)
+            
+        return x
+
+class NormformerDecoder(nn.Module):
+    def __init__(self, num_layers=4, model_dim=128, nhead=8, mpl_expansion_factor=4, dropout=0.1):
+        super().__init__()
+
+        # Symmetrical Transformer Blocks
+        self.transformer_blocks = nn.ModuleList([
+            NormformerBlock(model_dim, nhead, dropout=dropout) for _ in range(num_layers)
+        ])
+
+    def forward(self, z_quantized, mask=None):
+        """
+        z_quantized: The output from your FSQ bottleneck [Batch, Particles, model_dim]
+        """
+        # We apply the exact same mask inversion here. 
+        # Padded "fake" particles shouldn't attend to each other in the decoder either.
+        attn_mask = ~mask if mask is not None else None
+        
+        x = z_quantized
+        for layer in self.transformer_blocks:
+            x = layer(x, mask=attn_mask)
+        
+        return x
+
+class NormformerBlock(nn.Module):
+    def __init__(self, d_model, nhead, mlp_expansion_factor=4, dropout=0.1):
+        super().__init__()
+        # 1. Self-Attention Components
+        self.ln1 = nn.LayerNorm(d_model)
+        self.self_attn = nn.MultiheadAttention(d_model, nhead, dropout=dropout, batch_first=True)
+        
+        # This is the "Specific Normformer" Addition: 
+        # A LayerNorm applied to the output of the attention before the residual connection.
+        self.ln_post_attn = nn.LayerNorm(d_model)
+        
+        # 2. Feed-Forward Components
+        self.ln2 = nn.LayerNorm(d_model)
+        self.ff = nn.Sequential(
+            nn.Linear(d_model, d_model * mlp_expansion_factor),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(d_model * mlp_expansion_factor, d_model),
+            nn.Dropout(dropout)  # Differs from paper
+        )
+        
+        # Another "Specific Normformer" Addition:
+        # A LayerNorm applied to the output of the MLP before the residual connection.
+        self.ln_post_ff = nn.LayerNorm(d_model)
+
+    def forward(self, x, mask=None):
+        # --- Self-Attention Block ---
+        # Pre-norm
+        residual = x
+        x = self.ln1(x)
+        
+        # Attention
+        x, _ = self.self_attn(x, x, x, key_padding_mask=mask)
+        
+        # Post-norm (Normformer specific)
+        x = self.ln_post_attn(x)
+        
+        # Residual
+        x = residual + x
+        
+        # --- Feed-Forward Block ---
+        # Pre-norm
+        residual = x
+        x = self.ln2(x)
+        
+        # MLP
+        x = self.ff(x)
+        
+        # Post-norm (Normformer specific)
+        x = self.ln_post_ff(x)
+        
+        # Residual
+        x = residual + x
+        
+        return x
+
+# From https://github.com/uhh-pd-ml/enhancing-ntp4jets/blob/main/gabbro/models/transformer.py
+class MLP(nn.Module):
+    """Simple MLP for embedding."""
+
+    def __init__(
+        self,
+        input_dim: int,
+        output_dim: int,
+        hidden_dims: list = None,
+        dropout_rate: float = 0.0,
+        activation: str = "GELU",
+    ):
+        super().__init__()
+        self.input_dim = input_dim
+        self.hidden_dims = hidden_dims
+        self.output_dim = output_dim
+        self.dropout_rate = dropout_rate
+        act_fn = eval(f"torch.nn.{activation}")()
+
+        dims = [self.input_dim] + list(self.hidden_dims) + [self.output_dim]
+        layers = []
+        for i in range(len(dims) - 1):
+            layers.append(nn.Linear(dims[i], dims[i + 1]))
+            if i < len(dims) - 2:
+                layers.append(act_fn)
+                layers.append(nn.Dropout(self.dropout_rate))
+        self.layers = nn.Sequential(*layers)
+
+    def forward(self, x):
+        return self.layers(x)

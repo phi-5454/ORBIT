@@ -12,7 +12,7 @@ from data_loading import PreprocessTranformer
 
 # Model evaluation
 class PhysicsEvaluator:
-    def __init__(self, feature_names=["Eta", "Phi", "pT(log)"]):
+    def __init__(self, feature_names=["Eta", "Phi", "pT"]):
         self.feature_names = feature_names
 
     def evaluate_reconstruction(self, x, x_hat, mask):
@@ -57,9 +57,9 @@ class PhysicsEvaluator:
             ev_mask = mask_np[i]
             
             # Apply the mask to extract ONLY real particles for this specific event
-            # (Assuming indices: 0=pt, 1=eta, 2=phi)
-            ev_x_pt, ev_x_eta, ev_x_phi = x_np_tuple[i, ev_mask, 0], x_np_tuple[i, ev_mask, 1], x_np_tuple[i, ev_mask, 2]
-            ev_xhat_pt, ev_xhat_eta, ev_xhat_phi = x_hat_np_tuple[i, ev_mask, 0], x_hat_np_tuple[i, ev_mask, 1], x_hat_np_tuple[i, ev_mask, 2]
+            # (indices: 0=eta, 1=phi, 2=pt)
+            ev_x_eta, ev_x_phi, ev_x_pt = x_np_tuple[i, ev_mask, 0], x_np_tuple[i, ev_mask, 1], x_np_tuple[i, ev_mask, 2]
+            ev_xhat_eta, ev_xhat_phi, ev_xhat_pt = x_hat_np_tuple[i, ev_mask, 0], x_hat_np_tuple[i, ev_mask, 1], x_hat_np_tuple[i, ev_mask, 2]
 
             # TODO: Make work for events that are split into many parts
             # Cluster the True and Reconstructed Jets

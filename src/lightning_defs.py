@@ -20,31 +20,81 @@ class PHA_FSQ_VAE(L.LightningModule):
         dim_mu = len(model_cfg["fsq_mu_levels"])
         dim_alpha = len(model_cfg["fsq_alpha_levels"])
 
-        dim_quantized = dim_mu + dim_alpha
-        in_ch = model_cfg["input_dim"]
+        codebook_dim = dim_mu + dim_alpha
+        in_dim = model_cfg["input_dim"]
         hidden_dim = model_cfg["hidden_dim"]
-        latent_nodes = model_cfg["latent_nodes"]
+        num_heads = model_cfg["num_heads"]
+        num_enc_dec_layers = model_cfg["num_enc_dec_layers"]
+        nf_mlp_expansion_factor = model_cfg["normformer_mlp_expansion_factor"]
+        nf_dropout = model_cfg["normformer_dropout"]
 
+        self.input_proj = tm.MLP(in_dim, hidden_dim, [2 * hidden_dim, 2*hidden_dim])
+        self.latent_proj = tm.MLP(hidden_dim, codebook_dim, [2 * hidden_dim, 2*hidden_dim])
+
+        self.latent_proj_out = tm.MLP(codebook_dim, hidden_dim, [2 * hidden_dim, 2*hidden_dim])
+        self.output_proj = tm.MLP(hidden_dim, in_dim, [2 * hidden_dim, 2*hidden_dim])
+
+        self.encoder = tm.NormformerEncoder(num_layers=num_enc_dec_layers, model_dim=hidden_dim, nhead=num_heads, mpl_expansion_factor=nf_mlp_expansion_factor, dropout=nf_dropout)
+        '''
         self.encoder = tm.ParticleSetEncoder(
-            in_channels=in_ch,
+            in_channels=in_dim,
             hidden_dim=hidden_dim,
-            latent_nodes=latent_nodes,
+            latent_nodes=num_heads,
             out_channels=dim_quantized,
         )
-        self.phi = tm.Phi(dim_in=dim_quantized, dim_alpha=dim_alpha, dim_mu=dim_mu)
+        '''
+
+        # TODO: Rework phi
+        self.phi = tm.Phi(dim_in=hidden_dim, dim_alpha=dim_alpha, dim_mu=dim_mu)
 
         self.quantizer_mu = tm.FSQ(levels=model_cfg["fsq_mu_levels"])
         self.quantizer_alpha = tm.FSQ(levels=model_cfg["fsq_alpha_levels"])
 
-        self.psi = tm.Psi(dim_mu=dim_mu, dim_alpha=dim_alpha, dim_out=dim_quantized)
+        # TODO: Rework psi
+        self.psi = tm.Psi(dim_mu=dim_mu, dim_alpha=dim_alpha, dim_out=hidden_dim)
+
+        '''
         self.decoder = tm.ParticleSetDecoder(
-            latent_channels=dim_quantized,
+            latent_channels=codebook_dim,
             hidden_dim=hidden_dim,
             out_nodes=model_cfg["window_particles"],
-            out_channels=in_ch,
+            out_channels=in_dim,
         )
+        '''
+        self.decoder = tm.NormformerEncoder(num_layers=num_enc_dec_layers, model_dim=hidden_dim, nhead=num_heads, mpl_expansion_factor=nf_mlp_expansion_factor, dropout=nf_dropout)
 
         self.evaluator = PhysicsEvaluator()
+
+    def forward(self, x, mask):
+        # 1. Encode
+        x_proj = self.input_proj(x)
+        z_encoded = self.encoder(x_proj, mask)
+
+        # 2. Split
+        z_mu, z_alpha = self.phi(z_encoded)
+
+        # 3. Quantize
+        if(self.model_cfg["skip_quantization"]==True):
+            z_hat_mu = self.quantizer_mu(z_mu)
+            z_hat_alpha = self.quantizer_alpha(z_alpha)
+
+            z_decoded = self.psi(z_mu, z_alpha)
+        else:
+            z_hat_mu = self.quantizer_mu(z_mu)
+            z_hat_alpha = self.quantizer_alpha(z_alpha)
+
+            # 4. Straight Through Estimator (STE)
+            # TODO: abstract this away 
+            z_ste_mu = z_mu + (z_hat_mu - z_mu).detach()
+            z_ste_alpha = z_alpha + (z_hat_alpha - z_alpha).detach()
+
+            # 5. Merge and Decode
+            z_decoded = self.psi(z_ste_mu, z_ste_alpha)
+
+        x_hat_lat = self.decoder(z_decoded)
+        x_hat = self.output_proj(x_hat_lat)
+
+        return x_hat, z_mu, z_hat_mu, z_alpha, z_hat_alpha
 
     def configure_optimizers(self):
         # Tip: AdamW (with weight decay) is vastly superior to Adam for Transformers
@@ -108,34 +158,6 @@ class PHA_FSQ_VAE(L.LightningModule):
             return loss_pha, loss_l2, loss_abs, loss_commitment, loss_amplitude, x_hat
 
 
-    # WELD: Added the missing forward method orchestrating the split latent space
-    def forward(self, x, mask):
-        # 1. Encode
-        z_encoded = self.encoder(x, mask)
-
-        # 2. Split
-        z_mu, z_alpha = self.phi(z_encoded)
-
-        # 3. Quantize
-        if(self.model_cfg["skip_quantization"]==True):
-            z_hat_mu = self.quantizer_mu(z_mu)
-            z_hat_alpha = self.quantizer_alpha(z_alpha)
-
-            z_decoded = z_encoded
-        else:
-            z_hat_mu = self.quantizer_mu(z_mu)
-            z_hat_alpha = self.quantizer_alpha(z_alpha)
-
-            # 4. Straight Through Estimator (STE)
-            z_ste_mu = z_mu + (z_hat_mu - z_mu).detach()
-            z_ste_alpha = z_alpha + (z_hat_alpha - z_alpha).detach()
-
-            # 5. Merge and Decode
-            z_decoded = self.psi(z_ste_mu, z_ste_alpha)
-
-        x_hat = self.decoder(z_decoded)
-
-        return x_hat, z_mu, z_hat_mu, z_alpha, z_hat_alpha
 
     def _evaluate_and_log(self, sample_tuple, prefix="val"):
         """Handles evaluator routing for both validation and testing."""
