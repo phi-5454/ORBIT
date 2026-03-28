@@ -34,18 +34,6 @@ class TrainPipeline:
 
         train_files = train_val_files[:max(num_train,1)]
         val_files = train_val_files[min(num_train, num_train_val - 1):]
-        print("----")
-        print("----")
-        print("----")
-        print("----")
-        print("----")
-        print(len(train_files))
-        print(len(val_files))
-        print("----")
-        print("----")
-        print("----")
-        print("----")
-        print("----")
 
         self.datamodule = ParquetDataModule(train_files.tolist(), val_files.tolist(), test_files, window_particles=config["model"]["window_particles"])
 
