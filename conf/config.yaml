@@ -10,3 +10,4 @@ test_files: "./pq_files_test.txt"
 train_val_split: [0.80, 0.20]
 run_validation: True
 run_test: False
+earlystopping_patience: 5

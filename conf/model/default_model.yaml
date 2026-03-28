@@ -22,5 +22,6 @@ normformer_dropout: 0.1
 weight_decay: 1e-3
 commit_beta: 0.25
 skip_quantization: True
+use_attention: True
 # TODO: early stopping
 # TODO: Gradient clipping

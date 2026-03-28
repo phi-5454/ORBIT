@@ -138,14 +138,14 @@ class NormformerEncoder(nn.Module):
             NormformerBlock(model_dim, nhead, mlp_expansion_factor=mlp_expansion_factor, dropout=dropout) for _ in range(num_layers)
         ])
 
-    def forward(self, x, mask=None):
+    def forward(self, x, mask=None, use_attention=True):
         
         # Invert the mask for PyTorch's Attention backend
         # (Assuming your input mask has True for REAL particles)
         attn_mask = ~mask if mask is not None else None
         
         for layer in self.transformer_blocks:
-            x = layer(x, mask=attn_mask)
+            x = layer(x, mask=attn_mask, use_attention=use_attention)
             
         return x
 
@@ -158,7 +158,7 @@ class NormformerDecoder(nn.Module):
             NormformerBlock(model_dim, nhead, mlp_expansion_factor=mlp_expansion_factor, dropout=dropout) for _ in range(num_layers)
         ])
 
-    def forward(self, z_quantized, mask=None):
+    def forward(self, z_quantized, mask=None, use_attention=True):
         """
         z_quantized: The output from your FSQ bottleneck [Batch, Particles, model_dim]
         """
@@ -168,7 +168,7 @@ class NormformerDecoder(nn.Module):
         
         x = z_quantized
         for layer in self.transformer_blocks:
-            x = layer(x, mask=attn_mask)
+            x = layer(x, mask=attn_mask, use_attention=use_attention)
         
         return x
 
@@ -197,20 +197,24 @@ class NormformerBlock(nn.Module):
         # A LayerNorm applied to the output of the MLP before the residual connection.
         self.ln_post_ff = nn.LayerNorm(d_model)
 
-    def forward(self, x, mask=None):
+    def forward(self, x, mask=None, use_attention=True):
         # --- Self-Attention Block ---
         # Pre-norm
         residual = x
-        x = self.ln1(x)
         
-        # Attention
-        x, _ = self.self_attn(x, x, x, key_padding_mask=mask)
-        
-        # Post-norm (Normformer specific)
-        x = self.ln_post_attn(x)
-        
-        # Residual
-        x = residual + x
+        if use_attention:
+            x = self.ln1(x)
+            # Attention
+            #x, _ = self.self_attn(x, x, x, key_padding_mask=mask)
+            x, attn_weights = self.self_attn(x, x, x, key_padding_mask=mask)
+            
+            # Post-norm (Normformer specific)
+            x = self.ln_post_attn(x)
+            
+            # Residual
+            x = residual + x
+        else:
+            x = residual
         
         # --- Feed-Forward Block ---
         # Pre-norm

@@ -394,6 +394,7 @@ wandb_logger = L.pytorch.loggers.WandbLogger(
     entity=os.getenv("WANDB_ENTITY"),
     #name="whole_event_pha_fsq",
     log_model="all" # Note: If checkpoints become too large, set this to False
+    log_graph=True
 )
 
 # ==========================================

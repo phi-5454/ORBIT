@@ -5,5 +5,5 @@ check_val_every_n_epoch: 5
 accelerator: "auto"
 gradient_clip_val: 1.0
 limit_train_batches: null
-limit_test_batches: null
 limit_val_batches: null
+limit_test_batches: null

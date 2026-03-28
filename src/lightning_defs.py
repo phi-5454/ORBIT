@@ -27,6 +27,13 @@ class PHA_FSQ_VAE(L.LightningModule):
         num_enc_dec_layers = model_cfg["num_enc_dec_layers"]
         nf_mlp_expansion_factor = model_cfg["normformer_mlp_expansion_factor"]
         nf_dropout = model_cfg["normformer_dropout"]
+        batch_size = model_cfg["batch_size"]
+        window_particles = model_cfg["window_particles"]
+
+        self.example_input_array = (torch.randn(batch_size, window_particles, in_dim),
+                                    torch.ones(batch_size, window_particles, dtype=torch.bool)
+
+                                    )
 
         self.input_proj = tm.MLP(in_dim, hidden_dim, [2 * hidden_dim, 2*hidden_dim])
         self.latent_proj = tm.MLP(hidden_dim, codebook_dim, [2 * hidden_dim, 2*hidden_dim])
@@ -68,7 +75,7 @@ class PHA_FSQ_VAE(L.LightningModule):
     def forward(self, x, mask):
         # 1. Encode
         x_proj = self.input_proj(x)
-        z_encoded = self.encoder(x_proj, mask)
+        z_encoded = self.encoder(x_proj, mask, use_attention=self.model_cfg["use_attention"])
 
         # 2. Split
         z_mu, z_alpha = self.phi(z_encoded)
@@ -91,7 +98,7 @@ class PHA_FSQ_VAE(L.LightningModule):
             # 5. Merge and Decode
             z_decoded = self.psi(z_ste_mu, z_ste_alpha)
 
-        x_hat_lat = self.decoder(z_decoded)
+        x_hat_lat = self.decoder(z_decoded, mask, self.model_cfg["use_attention"])
         x_hat = self.output_proj(x_hat_lat)
 
         return x_hat, z_mu, z_hat_mu, z_alpha, z_hat_alpha
@@ -194,6 +201,7 @@ class PHA_FSQ_VAE(L.LightningModule):
 
                 plt.close(fig)
 
+    '''
     def on_fit_start(self) -> None:
         super().on_fit_start()
         """
@@ -204,6 +212,7 @@ class PHA_FSQ_VAE(L.LightningModule):
         if self.logger is None or not isinstance(self.logger, L.pytorch.loggers.WandbLogger):
             return
 
+    '''
 
     def training_step(self, batch, batch_idx):
         # WELD: Unpack the yielded tuple
