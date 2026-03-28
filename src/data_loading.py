@@ -98,7 +98,7 @@ class ParquetFeatureDataset(IterableDataset):
         self.batch_size = batch_size
 
     def __iter__(self):
-        # Read only the 3 physical features
+        # Read only the required physical features
         batches = self.dataset.to_batches(
             columns=self.features, batch_size=self.batch_size
         )
