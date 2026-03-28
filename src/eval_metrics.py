@@ -84,7 +84,7 @@ class PhysicsEvaluator:
             fig, ax = plt.subplots(figsize=(8, 6))
             
             # The standard physics plot is the Fractional Resolution: (Reco - True) / True
-            fractional_diff = (reco_jet_pts - true_jet_pts) / true_jet_pts
+            fractional_diff = (reco_jet_pts - true_jet_pts) / (true_jet_pts + 1e-8)
             
             ax.hist(fractional_diff, bins=50, range=(-0.5, 0.5), 
                     histtype='step', color='indigo', linewidth=2)
