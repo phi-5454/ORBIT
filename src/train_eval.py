@@ -24,7 +24,7 @@ class TrainPipeline:
         train_val_split = np.array(self.config["train_val_split"])
         train_val_split_norm = train_val_split / np.sum(train_val_split)
         num_train_val = len(train_val_files)
-        num_train = min(int(num_train_val * train_val_split_norm[0]), 1)
+        num_train = int(num_train_val * train_val_split_norm[0])
 
         #shuffle
         seed = 42
