@@ -33,12 +33,12 @@ def main(cfg: DictConfig):
     load_dotenv(dotenv_path=str(BASE_DIR / config["wandb_env"]), override=True)
 
     with open(str(BASE_DIR / config["train_val_files"])) as f:
-        lines = f.read().splitlines()
+        lines_train_val = f.read().splitlines()
 
-    train_val_split = config["train_val_split"]
-
-    train_val_parquet_path = lines[:3]
-    test_parquet_path = lines[:3]
+    lines_test = None
+    if(config["run_test"]):
+        with open(str(BASE_DIR / config["test_files"])) as f:
+            lines_test = f.read().splitlines()
 
     # Explicit login (relies on WANDB_API_KEY being in the env)
     wandb.login()
@@ -46,8 +46,8 @@ def main(cfg: DictConfig):
     # TODO: pass a sub-part of the config
     p = TrainPipeline(
         config=config,
-        train_files=train_val_parquet_path,
-        val_files=train_val_parquet_path,
+        train_val_files=lines_train_val,
+        test_files=lines_test,
     )
     p.run()
 

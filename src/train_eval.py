@@ -19,14 +19,45 @@ from lightning.pytorch.callbacks import ModelSummary
 
 class TrainPipeline:
     # TODO: handle all the params
-    def __init__(self, config, train_files=[], val_files=[], test_files=[]) -> None:
+    def __init__(self, config, train_val_files=[], test_files=[]) -> None:
         self.config = config
+        train_val_split = np.array(self.config["train_val_split"])
+        train_val_split_norm = train_val_split / np.sum(train_val_split)
+        num_train_val = len(train_val_files)
+        num_train = min(int(num_train_val * train_val_split_norm[0]), 1)
 
-        self.train_datamodule = ParquetDataModule(train_files, window_particles=config["model"]["window_particles"])
-        if self.config["run_validation"]:
-            self.val_datamodule = ParquetDataModule(val_files, window_particles=config["model"]["window_particles"])
-        if self.config["run_test"]:
-            self.test_datamodule = ParquetDataModule(test_files, window_particles=config["model"]["window_particles"])
+
+        print("--")
+        print("--")
+        print("--")
+        print("--")
+        print("--")
+        print("--")
+        print("--")
+        print("--")
+        print("--")
+        print(num_train)
+        print("--")
+        print("--")
+        print("--")
+        print("--")
+        print("--")
+        print("--")
+        print("--")
+        print("--")
+        print("--")
+
+        #shuffle
+        seed = 42
+        np.random.seed(seed)
+        indices = np.random.permutation(num_train_val)
+        train_val_files = np.array(train_val_files)[indices]
+
+        train_files = train_val_files[:max(num_train,1)]
+        val_files = train_val_files[min(num_train, num_train_val - 1):]
+
+        self.datamodule = ParquetDataModule(train_files.tolist(), val_files.tolist(), test_files, window_particles=config["model"]["window_particles"])
+
 
         # TODO: We assume we want to log with WandB.
         self.logger = L.pytorch.loggers.WandbLogger(
@@ -66,13 +97,13 @@ class TrainPipeline:
         self.logger.watch(model, log="all", log_freq=10, log_graph=True)
 
         # Train the model
-        self.trainer.fit(model, datamodule=self.train_datamodule)
+        self.trainer.fit(model, datamodule=self.datamodule)
 
         if run_validation:
-            self.trainer.validate(model, datamodule=self.val_datamodule)
+            self.trainer.validate(model, datamodule=self.datamodule)
 
         if run_test:
-            self.trainer.test(model, datamodule=self.test_datamodule)
+            self.trainer.test(model, datamodule=self.datamodule)
 
         # TODO: assumes a WandB logger
         self.logger.experiment.unwatch(model)

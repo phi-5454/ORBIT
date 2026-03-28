@@ -155,26 +155,28 @@ class ParquetFeatureDataset(IterableDataset):
 
 
 class ParquetDataModule(L.LightningDataModule):
-    def __init__(self, parquet_dir, features=feature_cols, window_particles=256):
+    def __init__(self, parquet_dirs_train, parquet_dirs_val, parquet_dirs_test, features=feature_cols, window_particles=256):
         super().__init__()
-        self.parquet_dir = parquet_dir
+        self.parquet_dirs_train = parquet_dirs_train
+        self.parquet_dirs_val = parquet_dirs_val
+        self.parquet_dirs_test = parquet_dirs_test
         self.features = features
         self.window_particles = window_particles
 
     def train_dataloader(self):
-        dataset = ParquetFeatureDataset(self.parquet_dir, self.features, self.window_particles)
+        dataset = ParquetFeatureDataset(self.parquet_dirs_train, self.features, self.window_particles)
         # Note: If num_workers > 0 on IterableDataset, you need a custom worker_init_fn
         # to prevent data duplication. Kept at 0 for safe out-of-the-box running.
         return DataLoader(dataset, batch_size=None, num_workers=0)
 
     def val_dataloader(self):
-        dataset = ParquetFeatureDataset(self.parquet_dir, self.features, self.window_particles)
+        dataset = ParquetFeatureDataset(self.parquet_dirs_val, self.features, self.window_particles)
         # Note: If num_workers > 0 on IterableDataset, you need a custom worker_init_fn
         # to prevent data duplication. Kept at 0 for safe out-of-the-box running.
         return DataLoader(dataset, batch_size=None, num_workers=0)
 
     def test_dataloader(self):
-        dataset = ParquetFeatureDataset(self.parquet_dir, self.features, self.window_particles)
+        dataset = ParquetFeatureDataset(self.parquet_dirs_test, self.features, self.window_particles)
         # Note: If num_workers > 0 on IterableDataset, you need a custom worker_init_fn
         # to prevent data duplication. Kept at 0 for safe out-of-the-box running.
         return DataLoader(dataset, batch_size=None, num_workers=0)
