@@ -1,7 +1,7 @@
 fast_dev_run: False
 default_root_dir: "outputs/"
 max_epochs: 10
-#check_val_every_n_epoch: 5
+check_val_every_n_epoch: 5
 accelerator: "auto"
 gradient_clip_val: 1.0
 limit_train_batches: null
