@@ -26,27 +26,6 @@ class TrainPipeline:
         num_train_val = len(train_val_files)
         num_train = min(int(num_train_val * train_val_split_norm[0]), 1)
 
-
-        print("--")
-        print("--")
-        print("--")
-        print("--")
-        print("--")
-        print("--")
-        print("--")
-        print("--")
-        print("--")
-        print(num_train)
-        print("--")
-        print("--")
-        print("--")
-        print("--")
-        print("--")
-        print("--")
-        print("--")
-        print("--")
-        print("--")
-
         #shuffle
         seed = 42
         np.random.seed(seed)
