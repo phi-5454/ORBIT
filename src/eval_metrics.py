@@ -5,10 +5,10 @@ import numpy as np
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
 import numpy as np
-import seaborn as sns
-import torch
+import mplhep as mh
 
 from data_loading import PreprocessTranformer
+
 
 # Model evaluation
 class PhysicsEvaluator:
@@ -67,12 +67,16 @@ class PhysicsEvaluator:
             reco_jets = jet_reco(ev_xhat_pt, ev_xhat_eta, ev_xhat_phi)
 
             # Match by pT ordering: FastJet already sorts them descending by default!
-            # We just take the top N jets, where N is the minimum found in either set.
             n_match = min(len(true_jets["pt"]), len(reco_jets["pt"]))
             
             if n_match > 0:
                 true_jet_pts.extend(true_jets["pt"][:n_match])
                 reco_jet_pts.extend(reco_jets["pt"][:n_match])
+
+        # ==========================================
+        # APPLY MPLHEP STYLE GLOBALLY FOR THESE PLOTS
+        # ==========================================
+        mh.style.use(mh.style.ROOT)
 
         # ==========================================
         # 3. PLOTTING THE JET DIFFERENCES
@@ -83,18 +87,17 @@ class PhysicsEvaluator:
 
             fig, ax = plt.subplots(figsize=(8, 6))
             
-            # The standard physics plot is the Fractional Resolution: (Reco - True) / True
             fractional_diff = (reco_jet_pts - true_jet_pts) / (true_jet_pts + 1e-8)
             
-            ax.hist(fractional_diff, bins=50, range=(-0.5, 0.5), 
-                    histtype='step', color='indigo', linewidth=2)
+            # Use NumPy to calculate bins, then mplhep to plot
+            counts, bins = np.histogram(fractional_diff, bins=50, range=(-0.5, 0.5))
+            mh.histplot(counts, bins=bins, ax=ax, histtype='step', color='indigo', linewidth=2)
             
             ax.axvline(0, color='black', linestyle='--', alpha=0.5)
             ax.set_xlabel(r"Fractional $p_T$ Resolution: $(p_T^{reco} - p_T^{true}) / p_T^{true}$")
             ax.set_ylabel("Number of Jets")
             ax.set_title("Jet Transverse Momentum Recovery")
             
-            # Save the figure to your results dictionary so your router catches it
             results["plots/jet_pt_resolution"] = fig
 
         # ==========================================
@@ -104,113 +107,95 @@ class PhysicsEvaluator:
         fig1.suptitle("FSQ-VAE: Original vs. Reconstructed Features (per-particle)", fontsize=16)
         
         for i in range(3):
-            # TODO: magic constants...
-            # Plot Original
-            sns.histplot(
-                x_np[:, i],
-                bins=50,
-                color="blue",
-                alpha=0.5,
-                label="Original",
-                kde=False,
-                log_scale=(True if i==2 else None),
-                stat="density",
+            # Calculate explicit shared bins to align the Original and Reco perfectly
+            min_val = min(x_np[:, i].min(), x_hat_np[:, i].min())
+            max_val = max(x_np[:, i].max(), x_hat_np[:, i].max())
+            
+            if i == 2:  # pT needs log bins
+                min_val = max(min_val, 1e-8)
+                bins = np.logspace(np.log10(min_val), np.log10(max_val), 50)
+                axes[i].set_xscale("log")
+            else:
+                bins = np.linspace(min_val, max_val, 50)
+
+            # Histogram the data (density=True replaces seaborn's stat="density")
+            counts_orig, _ = np.histogram(x_np[:, i], bins=bins, density=True)
+            counts_reco, _ = np.histogram(x_hat_np[:, i], bins=bins, density=True)
+
+            # Plot both simultaneously using mplhep
+            mh.histplot(
+                [counts_orig, counts_reco], 
+                bins=bins, 
                 ax=axes[i],
-            )
-            # Plot Reconstructed
-            sns.histplot(
-                x_hat_np[:, i],
-                bins=50,
-                color="orange",
-                alpha=0.5,
-                label="Reconstructed",
-                kde=False,
-                stat="density",
-                log_scale=(True if i==2 else None),
-                ax=axes[i],
+                label=["Original", "Reconstructed"],
+                color=["blue", "orange"],
+                histtype='fill', 
+                alpha=0.5, 
+                edgecolor=["blue", "orange"] # Keeps the step outlines sharp
             )
 
-
-
-
-            axes[i].set_title(
-                f"{self.feature_names[i]} (MSE: {mse_per_feature[i]:.4f})"
-            )
+            axes[i].set_title(f"{self.feature_names[i]} (MSE: {mse_per_feature[i]:.4f})")
+            axes[i].set_ylabel("Density")
             axes[i].legend()
 
         plt.tight_layout()
-        results["plots/kinematics"] = fig1  # Save Figure 1
+        results["plots/kinematics"] = fig1
 
         # ==========================================
         # FIGURE 2: Energy / Momentum (Mass assuming m=0)
         # ==========================================
         fig2, axs = plt.subplots(1, 2, figsize=(16, 5))
 
-        # Assuming indices: 0 = Eta, 1 = Phi, 2 = log(pT)
-        # We MUST use np.exp() on column 2 to get physical pT before calculating E = pT * cosh(eta)
-        #pt_orig = np.exp(x_np[:, 2])
-        #pt_reco = np.exp(x_hat_np[:, 2])
         pt_orig = x_np[:, 2]
         pt_reco = x_hat_np[:, 2]
 
         energy_orig = pt_orig * np.cosh(x_np[:, 0])
         energy_reco = pt_reco * np.cosh(x_hat_np[:, 0])
 
-
         min_val = max(min(energy_orig.min(), energy_reco.min()), 1e-8)
         max_val = max(energy_orig.max(), energy_reco.max())
-
         log_bins = np.logspace(np.log10(min_val), np.log10(max_val), num=50)
 
         # Plot 1: Energy Distribution
-        axs[0].set_title(
-            "FSQ-VAE: Original vs. Reconstructed Energy (m=0)", fontsize=14
-        )
-        sns.histplot(
-            energy_orig,
+        axs[0].set_title("FSQ-VAE: Original vs. Reconstructed Energy (m=0)", fontsize=14)
+        
+        counts_e_orig, _ = np.histogram(energy_orig, bins=log_bins, density=True)
+        counts_e_reco, _ = np.histogram(energy_reco, bins=log_bins, density=True)
+        
+        mh.histplot(
+            [counts_e_orig, counts_e_reco],
             bins=log_bins,
-            color="blue",
-            alpha=0.5,
-            label="Original",
-            kde=False,
-            stat="density",
             ax=axs[0],
-        )
-        sns.histplot(
-            energy_reco,
-            bins=log_bins,
-            color="orange",
+            label=["Original", "Reconstructed"],
+            color=["blue", "orange"],
+            histtype='fill',
             alpha=0.5,
-            label="Reconstructed",
-            kde=False,
-            stat="density",
-            ax=axs[0],
+            edgecolor=["blue", "orange"]
         )
         axs[0].set_xscale("log")
+        axs[0].set_ylabel("Density")
         axs[0].legend()
 
         # Plot 2: Residuals (Reco - Orig)
-        # We calculate MSE of the physical energy to display in the title
         energy_mse = np.mean((energy_reco - energy_orig) ** 2)
-
-        axs[1].set_title(
-            f"Residuals: E_reco - E_original (MSE: {energy_mse:.2f})", fontsize=14
-        )
-        sns.histplot(
-            energy_reco - energy_orig,
-            bins=50,
-            color="green",
+        axs[1].set_title(f"Residuals: E_reco - E_original (MSE: {energy_mse:.2f})", fontsize=14)
+        
+        res_counts, res_bins = np.histogram(energy_reco - energy_orig, bins=50, density=True)
+        mh.histplot(
+            res_counts, 
+            bins=res_bins, 
+            ax=axs[1], 
+            color="green", 
+            histtype='fill', 
             alpha=0.5,
-            kde=False,
-            stat="density",
-            ax=axs[1],
+            edgecolor="green"
         )
+        axs[1].set_ylabel("Density")
 
         plt.tight_layout()
-        results["plots/energy_residuals"] = fig2  # Save Figure 2
+        results["plots/energy_residuals"] = fig2
 
         return results
-
 
 class EventJetReconstructor:
     def __init__(self, R=0.8, min_jet_pt=200.0, max_jet_eta=None):
