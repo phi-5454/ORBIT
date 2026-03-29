@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 import torch
 import torch.nn.functional as F
 from torch.optim.lr_scheduler import LinearLR
+import numpy as np
 
 from eval_metrics import PhysicsEvaluator
 import torch_modules as tm
@@ -178,6 +179,9 @@ class PHA_FSQ_VAE(L.LightningModule):
         x, x_hat, mask = sample_tuple
         results = self.evaluator.evaluate_reconstruction(x, x_hat, mask)
 
+        # Initialize a dictionary to catch all the raw histogram arrays
+        histograms_to_save = {}
+
         for key, value in results.items():
             # 1. Route Scalars
             if isinstance(value, (int, float)):
@@ -204,7 +208,34 @@ class PHA_FSQ_VAE(L.LightningModule):
                     )
 
                 plt.close(fig)
+                
+            # 3. Route Raw Data (NumPy Arrays for Histograms)
+            elif isinstance(value, np.ndarray):
+                # Strip the "histograms/" prefix so the internal file keys are clean
+                clean_key = key.replace("histograms/", "").replace("/", "_")
+                histograms_to_save[clean_key] = value
 
+        # ==========================================
+        # 4. Save the collected histograms to disk
+        # ==========================================
+        if histograms_to_save:
+            save_dir = "saved_histograms"
+            os.makedirs(save_dir, exist_ok=True)
+            
+            # Format: saved_histograms/val_hists_step_15000.npz
+            filepath = f"{save_dir}/{prefix}_hists_step_{self.global_step}.npz"
+            
+            # Save all arrays into a single compressed binary file
+            np.savez_compressed(filepath, **histograms_to_save)
+            
+            # Optional but highly recommended: Backup the raw data to WandB!
+            if isinstance(self.logger, L.pytorch.loggers.WandbLogger):
+                artifact = wandb.Artifact(
+                    name=f"{prefix}_histograms_step_{self.global_step}", 
+                    type="histogram_data"
+                )
+                artifact.add_file(filepath)
+                self.logger.experiment.log_artifact(artifact)
     '''
     def on_fit_start(self) -> None:
         super().on_fit_start()
