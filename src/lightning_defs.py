@@ -137,6 +137,8 @@ class PHA_FSQ_VAE(L.LightningModule):
             """
             x_hat, z_mu, z_hat_mu, z_alpha, z_hat_alpha = self(x, mask)
             if(not torch.isfinite(x_hat).all().item()):
+                print(x)
+                print(x_hat)
                 print("111")
             if(not torch.isfinite(z_mu).all().item()):
                 print("222")
