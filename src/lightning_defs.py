@@ -77,20 +77,12 @@ class PHA_FSQ_VAE(L.LightningModule):
         # 1. Encode
         x_proj = self.input_proj(x)
 
-        if(not torch.isfinite(x_proj).all().item()):
-            print("111_")
+        #if(not torch.isfinite(x_proj).all().item()):
+            #print("111_")
         z_encoded = self.encoder(x_proj, mask, use_attention=self.model_cfg["use_attention"])
-        if(not torch.isfinite(z_encoded).all().item()):
-            print("222_")
 
         # 2. Split
         z_mu, z_alpha = self.phi(z_encoded)
-        if(not torch.isfinite(z_mu).all().item()):
-            print("333_")
-        if(not torch.isfinite(z_mu).all().item()):
-            print("333_")
-        if(not torch.isfinite(z_alpha).all().item()):
-            print("444_")
 
         # 3. Quantize
         if(self.model_cfg["skip_quantization"]==True):
@@ -100,32 +92,18 @@ class PHA_FSQ_VAE(L.LightningModule):
             z_decoded = self.psi(z_mu, z_alpha)
         else:
             z_hat_mu = self.quantizer_mu(z_mu)
-            if(not torch.isfinite(z_hat_mu).all().item()):
-                print("eeeee_")
             z_hat_alpha = self.quantizer_alpha(z_alpha)
-            if(not torch.isfinite(z_hat_alpha).all().item()):
-                print("aaaaa_")
 
             # 4. Straight Through Estimator (STE)
             # TODO: abstract this away 
             z_ste_mu = z_mu + (z_hat_mu - z_mu).detach()
-            if(not torch.isfinite(z_ste_mu).all().item()):
-                print("ooooo_")
             z_ste_alpha = z_alpha + (z_hat_alpha - z_alpha).detach()
-            if(not torch.isfinite(z_ste_alpha).all().item()):
-                print("iiii_")
 
             # 5. Merge and Decode
             z_decoded = self.psi(z_ste_mu, z_ste_alpha)
-            if(not torch.isfinite(z_decoded).all().item()):
-                print("uuuu_")
 
         x_hat_lat = self.decoder(z_decoded, mask, self.model_cfg["use_attention"])
-        if(not torch.isfinite(x_hat_lat).all().item()):
-            print("kkkkk_")
         x_hat = self.output_proj(x_hat_lat)
-        if(not torch.isfinite(x_hat).all().item()):
-            print("qqqqqqc_")
 
         return x_hat, z_mu, z_hat_mu, z_alpha, z_hat_alpha
 
@@ -161,18 +139,6 @@ class PHA_FSQ_VAE(L.LightningModule):
             Assuming x shape is [Batch, Particles, Features] and phi is at phi_idx.
             """
             x_hat, z_mu, z_hat_mu, z_alpha, z_hat_alpha = self(x, mask)
-            if(not torch.isfinite(x_hat).all().item()):
-                print("111")
-            if(not torch.isfinite(z_mu).all().item()):
-                print("222")
-            if(not torch.isfinite(z_hat_mu).all().item()):
-                print("333")
-            if(not torch.isfinite(z_alpha).all().item()):
-                print("444")
-            if(not torch.isfinite(z_hat_alpha).all().item()):
-                print("555")
-            if(not torch.isfinite(x).all().item()):
-                print("666")
             
             mask_3d = mask.unsqueeze(-1).expand_as(x)
 
@@ -184,22 +150,14 @@ class PHA_FSQ_VAE(L.LightningModule):
             # PyTorch from throwing an "in-place operation" Autograd error!
             diff_wrapped = diff.clone()
             diff_wrapped[..., phi_idx] = (diff[..., phi_idx] + 1) % (2 * 1) - 1
-            if(not torch.isfinite(diff_wrapped).all().item()):
-                print("AAA")
 
             # 3. Calculate the actual feature losses using the wrapped difference
             loss_abs_full = torch.abs(diff_wrapped)
-            if(not torch.isfinite(loss_abs_full).all().item()):
-                print("BBB")
             loss_l2_full = diff_wrapped ** 2  # Equivalent to F.mse_loss under the hood
 
             # 4. Apply the mask and mean (unchanged from your original code)
             loss_abs = (loss_abs_full * mask_3d).sum() / mask_3d.sum().clamp(min=1.0)
             loss_l2 = (loss_l2_full * mask_3d).sum() / mask_3d.sum().clamp(min=1.0)
-            if(not torch.isfinite(loss_l2).all().item()):
-                print("CCC")
-            if(not torch.isfinite(loss_abs).all().item()):
-                print("DDD")
 
             # 5. Calculate latent losses (unchanged)
             loss_commitment = F.mse_loss(z_mu, z_hat_mu.detach())
