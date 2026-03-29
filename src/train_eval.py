@@ -53,7 +53,7 @@ class TrainPipeline:
         train_files = train_val_files[:max(num_train,1)]
         val_files = train_val_files[min(num_train, num_train_val - 1):]
 
-        self.datamodule = ParquetDataModule(train_files.tolist(), val_files.tolist(), test_files, window_particles=config["model"]["window_particles"])
+        self.datamodule = ParquetDataModule(train_files.tolist(), val_files.tolist(), test_files, window_particles=config["model"]["window_particles"], num_workers=config["num_dataload_workers"])
 
 
         # TODO: We assume we want to log with WandB.

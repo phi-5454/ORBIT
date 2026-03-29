@@ -165,25 +165,41 @@ class ParquetFeatureDataset(IterableDataset):
 
 
 class ParquetDataModule(L.LightningDataModule):
-    def __init__(self, parquet_dirs_train, parquet_dirs_val, parquet_dirs_test, features=feature_cols, window_particles=256, num_workers=4):
+    def __init__(self, parquet_dirs_train, parquet_dirs_val, parquet_dirs_test, features=feature_cols, window_particles=256, num_workers=0):
         super().__init__()
         self.parquet_dirs_train = parquet_dirs_train
         self.parquet_dirs_val = parquet_dirs_val
         self.parquet_dirs_test = parquet_dirs_test
         self.features = features
         self.window_particles = window_particles
-        
-        # Default to a safe number, or use os.cpu_count() for max throughput
         self.num_workers = num_workers
 
     def train_dataloader(self):
         dataset = ParquetFeatureDataset(self.parquet_dirs_train, self.features, self.window_particles)
-        return DataLoader(dataset, batch_size=None, num_workers=self.num_workers, persistent_workers=True)
+        return DataLoader(
+            dataset, 
+            batch_size=None, 
+            num_workers=self.num_workers, 
+            # FIX: Automatically disables persistence when debugging with 0 workers
+            persistent_workers=(self.num_workers > 0) 
+        )
 
     def val_dataloader(self):
         dataset = ParquetFeatureDataset(self.parquet_dirs_val, self.features, self.window_particles)
-        return DataLoader(dataset, batch_size=None, num_workers=self.num_workers, persistent_workers=True)
+        return DataLoader(
+            dataset, 
+            batch_size=None, 
+            num_workers=self.num_workers, 
+            # FIX: Automatically disables persistence when debugging with 0 workers
+            persistent_workers=(self.num_workers > 0)
+        )
 
     def test_dataloader(self):
         dataset = ParquetFeatureDataset(self.parquet_dirs_test, self.features, self.window_particles)
-        return DataLoader(dataset, batch_size=None, num_workers=self.num_workers)
+        # Test loaders generally shouldn't use persistent workers anyway, 
+        # since they only run once at the very end.
+        return DataLoader(
+            dataset, 
+            batch_size=None, 
+            num_workers=self.num_workers
+        )
