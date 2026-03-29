@@ -5,7 +5,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.utils.rnn import pad_sequence
-from torch.utils.data import DataLoader, IterableDataset
+from torch.utils.data import IterableDataset, DataLoader, get_worker_info
 
 # TODO: This is a bit farouche
 feature_cols = ["L1T_PUPPIPart_Eta", "L1T_PUPPIPart_Phi", "L1T_PUPPIPart_PT", "L1T_PUPPIPart_PID", "L1T_PUPPIPart_PuppiW"]
@@ -90,93 +90,100 @@ class PreprocessTranformer:
         return tensor
 
 
+
 class ParquetFeatureDataset(IterableDataset):
     def __init__(self, parquet_dirs, features, max_particles=256, batch_size=32):
+        # We load the base dataset just to map the files
         self.dataset = ds.dataset(parquet_dirs, format="parquet")
         self.features = features
         self.max_particles = max_particles
         self.batch_size = batch_size
 
     def __iter__(self):
-        # Read only the required physical features
-        batches = self.dataset.to_batches(
+        # 1. GET WORKER INFO
+        worker_info = get_worker_info()
+        files = self.dataset.files
+
+        # 2. SHARD THE FILES ACROSS WORKERS
+        if worker_info is not None:
+            worker_id = worker_info.id
+            num_workers = worker_info.num_workers
+            
+            # Slice the file list: start at worker_id, step by num_workers
+            files = files[worker_id::num_workers]
+            
+            # Edge case: If there are more workers than files, some workers get nothing
+            if not files:
+                return
+
+        # 3. CREATE A WORKER-SPECIFIC DATASET
+        worker_dataset = ds.dataset(files, format="parquet")
+
+        # Read only the required physical features for this specific worker
+        batches = worker_dataset.to_batches(
             columns=self.features, batch_size=self.batch_size
         )
 
         for batch in batches:
-            # Convert to Pandas. Each cell now contains a numpy array of particles.
             df = batch.to_pandas()
             df = PreprocessTranformer().forward_dataframe(df)
 
             event_tensors = []
-
             PUPPI_cutoff = 0.05
 
-            # Zip the columns. This iterates row-by-row (event-by-event)
-            # TODO: PID
             for eta_arr, phi_arr, pt_arr, pid_arr, puppiw_arr in zip(
                 df[self.features[0]], df[self.features[1]], df[self.features[2]], df[self.features[3]], df[self.features[4]] 
             ):
                 PUPPI_mask = puppiw_arr > PUPPI_cutoff
 
-
-                # Skip empty events (e.g., zero particles passed the trigger)
                 if len(eta_arr) == 0:
                     continue
 
-                # Stack the 1D arrays into a [N, 3] matrix for this specific event
-                coords = np.column_stack([eta_arr[PUPPI_mask], phi_arr[PUPPI_mask], pt_arr[PUPPI_mask]]).astype(np.float32)
+                coords = np.column_stack([
+                    eta_arr[PUPPI_mask], 
+                    phi_arr[PUPPI_mask], 
+                    pt_arr[PUPPI_mask]
+                ]).astype(np.float32)
 
-                # Apply Log transform safely directly to the PT column (Index 2)
-                # coords[:, 2] = np.log(coords[:, 2] + 1e-8)
-
-                # Enforce the maximum particles limit
-                # TODO: Split the event into many smaller if exceed max. particle count
                 coords = coords[: self.max_particles]
                 event_tensors.append(torch.tensor(coords))
 
             if not event_tensors:
                 continue
 
-            # Pad the variable-length events with 0.0 to create a square batch tensor
             padded_events = pad_sequence(
                 event_tensors, batch_first=True, padding_value=0.0
             )
 
-            # Force shape to [Batch, 256, 3] in case the largest event in this specific batch was < 256
             pad_len = self.max_particles - padded_events.shape[1]
             if pad_len > 0:
                 padded_events = F.pad(padded_events, (0, 0, 0, pad_len), value=0.0)
 
-            # Create Mask: True for REAL particles, False for PADDING
             mask = padded_events[:, :, 2] != 0.0
 
             yield padded_events, mask
 
 
 class ParquetDataModule(L.LightningDataModule):
-    def __init__(self, parquet_dirs_train, parquet_dirs_val, parquet_dirs_test, features=feature_cols, window_particles=256):
+    def __init__(self, parquet_dirs_train, parquet_dirs_val, parquet_dirs_test, features=feature_cols, window_particles=256, num_workers=4):
         super().__init__()
         self.parquet_dirs_train = parquet_dirs_train
         self.parquet_dirs_val = parquet_dirs_val
         self.parquet_dirs_test = parquet_dirs_test
         self.features = features
         self.window_particles = window_particles
+        
+        # Default to a safe number, or use os.cpu_count() for max throughput
+        self.num_workers = num_workers
 
     def train_dataloader(self):
         dataset = ParquetFeatureDataset(self.parquet_dirs_train, self.features, self.window_particles)
-        # Note: If num_workers > 0 on IterableDataset, you need a custom worker_init_fn
-        # to prevent data duplication. Kept at 0 for safe out-of-the-box running.
-        return DataLoader(dataset, batch_size=None, num_workers=0)
+        return DataLoader(dataset, batch_size=None, num_workers=self.num_workers, persistent_workers=True)
 
     def val_dataloader(self):
         dataset = ParquetFeatureDataset(self.parquet_dirs_val, self.features, self.window_particles)
-        # Note: If num_workers > 0 on IterableDataset, you need a custom worker_init_fn
-        # to prevent data duplication. Kept at 0 for safe out-of-the-box running.
-        return DataLoader(dataset, batch_size=None, num_workers=0)
+        return DataLoader(dataset, batch_size=None, num_workers=self.num_workers, persistent_workers=True)
 
     def test_dataloader(self):
         dataset = ParquetFeatureDataset(self.parquet_dirs_test, self.features, self.window_particles)
-        # Note: If num_workers > 0 on IterableDataset, you need a custom worker_init_fn
-        # to prevent data duplication. Kept at 0 for safe out-of-the-box running.
-        return DataLoader(dataset, batch_size=None, num_workers=0)
+        return DataLoader(dataset, batch_size=None, num_workers=self.num_workers)
