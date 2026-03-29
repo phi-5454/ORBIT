@@ -49,7 +49,7 @@ def main(cfg: DictConfig):
         train_val_files=lines_train_val,
         test_files=lines_test,
     )
-    p.run()
+    p.run(config["run_validation"], config["run_test"])
 
     print("Done running training pipeline")
 

@@ -102,7 +102,7 @@ class PhysicsEvaluator:
         # ==========================================
         # FIGURE 1: Kinematic Features
         # ==========================================
-        fig1, axes = plt.subplots(1, 3, figsize=(18, 5))
+        fig1, axes = plt.subplots(1, 3, figsize=(18, 8))
         fig1.suptitle("FSQ-VAE: Original vs. Reconstructed Features (per-particle)", fontsize=16)
         
         for i in range(3):

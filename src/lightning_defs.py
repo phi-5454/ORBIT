@@ -21,6 +21,7 @@ class PHA_FSQ_VAE(L.LightningModule):
         self.save_hyperparameters()
 
         self.total_train_events_seen = 0
+        self.test_step_outputs = []
 
         dim_mu = len(model_cfg["fsq_mu_levels"])
         dim_alpha = len(model_cfg["fsq_alpha_levels"])
@@ -306,9 +307,8 @@ class PHA_FSQ_VAE(L.LightningModule):
             sync_dist=True,
         )
 
-        # if batch_idx == 0:
-        # self.val_sample = (x.detach(), x_hat.detach(), mask.detach())
-        self.val_sample = (x.detach(), x_hat.detach(), mask.detach())
+        if batch_idx == 0:
+            self.val_sample = (x.detach(), x_hat.detach(), mask.detach())
 
     def test_step(self, batch, batch_idx):
         # TODO: Code duplication between training and validation.
@@ -321,19 +321,24 @@ class PHA_FSQ_VAE(L.LightningModule):
         # Logging
         self.log_dict(
             {
-                "val_loss": loss_pha,
-                "val_mse_loss": loss_l2,
-                "val_l1_recon": loss_abs,
-                "val_commit_mu": loss_commit,
-                "val_commit_alpha": loss_amp,
+                "test_loss": loss_pha,
+                "test_mse_loss": loss_l2,
+                "test_l1_recon": loss_abs,
+                "test_commit_mu": loss_commit,
+                "test_commit_alpha": loss_amp,
             },
             prog_bar=True,
             sync_dist=True,
         )
 
-        # if batch_idx == 0:
-        # self.test_sample = (x.detach(), x_hat.detach(), mask.detach())
-        self.test_sample = (x.detach(), x_hat.detach(), mask.detach())
+        self.test_step_outputs.append({
+            "x": x.detach().cpu(),
+            "x_hat": x_hat.detach().cpu(),
+            "mask": mask.detach().cpu()
+        })
+
+        if batch_idx == 0:
+            self.test_sample = (x.detach(), x_hat.detach(), mask.detach())
 
     # Log the validation metrics and plots
     def on_validation_epoch_end(self):
@@ -344,7 +349,18 @@ class PHA_FSQ_VAE(L.LightningModule):
         self._evaluate_and_log(getattr(self, "val_sample", None), prefix="val")
         self._evaluate_and_log(getattr(self, "jet_reco", None), prefix="val")
 
-    def on_test_epoch_end(self):
 
-        # Pass the test sample and tell the router to use the "test" prefix
-        self._evaluate_and_log(getattr(self, "test_sample", None), prefix="test")
+    def on_test_epoch_end(self):
+            """Runs once at the very end of trainer.test()"""
+            
+            # 3. Concatenate all lists into giant tensors
+            x_all = torch.cat([b["x"] for b in self.test_step_outputs], dim=0)
+            x_hat_all = torch.cat([b["x_hat"] for b in self.test_step_outputs], dim=0)
+            mask_all = torch.cat([b["mask"] for b in self.test_step_outputs], dim=0)
+            
+            # 4. Pass the giant tuple to your router
+            giant_tuple = (x_all, x_hat_all, mask_all)
+            self._evaluate_and_log(giant_tuple, prefix="test")
+            
+            # 5. Clear the memory manually
+            self.test_step_outputs.clear()
