@@ -143,9 +143,14 @@ class NormformerEncoder(nn.Module):
         # Invert the mask for PyTorch's Attention backend
         # (Assuming your input mask has True for REAL particles)
         attn_mask = ~mask if mask is not None else None
+
+        i = 0
         
         for layer in self.transformer_blocks:
             x = layer(x, mask=attn_mask, use_attention=use_attention)
+            if(not torch.isfinite(x).all().item()):
+                print("777_", i)
+            i += 1
             
         return x
 
