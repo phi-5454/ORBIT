@@ -149,10 +149,20 @@ class PHA_FSQ_VAE(L.LightningModule):
             diff_wrapped[..., phi_idx] = (diff[..., phi_idx] + 1) % (2 * 1) - 1
             if(not torch.isfinite(diff_wrapped)):
                 print("AAA")
+                print("AAA")
+                print("AAA")
+                print("AAA")
+                print("AAA")
+                print("AAA")
 
             # 3. Calculate the actual feature losses using the wrapped difference
             loss_abs_full = torch.abs(diff_wrapped)
             if(not torch.isfinite(loss_abs_full)):
+                print("BBB")
+                print("BBB")
+                print("BBB")
+                print("BBB")
+                print("BBB")
                 print("BBB")
             loss_l2_full = diff_wrapped ** 2  # Equivalent to F.mse_loss under the hood
 
@@ -161,7 +171,16 @@ class PHA_FSQ_VAE(L.LightningModule):
             loss_l2 = (loss_l2_full * mask_3d).sum() / mask_3d.sum().clamp(min=1.0)
             if(not torch.isfinite(loss_l2)):
                 print("CCC")
+                print("CCC")
+                print("CCC")
+                print("CCC")
+                print("CCC")
             if(not torch.isfinite(loss_abs)):
+                print("DDD")
+                print("DDD")
+                print("DDD")
+                print("DDD")
+                print("DDD")
                 print("DDD")
 
             # 5. Calculate latent losses (unchanged)
