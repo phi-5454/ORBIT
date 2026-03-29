@@ -212,6 +212,11 @@ class NormformerBlock(nn.Module):
             if(not torch.isfinite(x).all().item()):
                 print("..._0")
             # Attention
+            if mask is not None:
+                all_padded_rows = mask.all(dim=-1) 
+                # Artificially unmask the first token for those empty rows to prevent 0/0 Softmax
+                mask[all_padded_rows, 0] = False
+
             #x, _ = self.self_attn(x, x, x, key_padding_mask=mask)
             x, attn_weights = self.self_attn(x, x, x, key_padding_mask=mask)
             if(not torch.isfinite(x).all().item()):
