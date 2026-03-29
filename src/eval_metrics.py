@@ -194,7 +194,7 @@ class PhysicsEvaluator:
         # FIGURE 3: Jet Substructure (Mass & Tau32)
         # ==========================================
         if len(true_jet_masses) > 0:
-            fig3, axs3 = plt.subplots(1, 3, figsize=(18, 5))
+            fig3, axs3 = plt.subplots(1, 3, figsize=(18, 8))
             fig3.suptitle("FSQ-VAE: Jet Substructure", fontsize=16)
 
             true_jet_masses = np.array(true_jet_masses)
@@ -203,9 +203,11 @@ class PhysicsEvaluator:
             reco_tau32s = np.array(reco_tau32s)
 
             # ---------------- Plot 3.1: Jet Mass ----------------
-            min_mass = max(0, min(true_jet_masses.min(), reco_jet_masses.min()))
-            max_mass = max(true_jet_masses.max(), reco_jet_masses.max())
-            mass_bins = np.linspace(min_mass, max_mass, 50)
+            #min_mass = max(0, min(true_jet_masses.min(), reco_jet_masses.min()))
+            #max_mass = max(true_jet_masses.max(), reco_jet_masses.max())
+            min_mass = 0
+            max_mass = 300
+            mass_bins = np.linspace(min_mass, max_mass, 100)
 
             counts_m_orig, _ = np.histogram(true_jet_masses, bins=mass_bins, density=True)
             counts_m_reco, _ = np.histogram(reco_jet_masses, bins=mass_bins, density=True)
@@ -226,7 +228,8 @@ class PhysicsEvaluator:
             # ---------------- Plot 3.2: Jet Mass Diff ----------------
             mass_diff = reco_jet_masses - true_jet_masses
             # Using percentiles to ignore crazy outliers stretching the axes
-            diff_bins = np.linspace(np.percentile(mass_diff, 1), np.percentile(mass_diff, 99), 50)
+            #diff_bins = np.linspace(np.percentile(mass_diff, 1), np.percentile(mass_diff, 99), 50)
+            diff_bins = np.linspace(-50, 50, 100)
 
             counts_mdiff, _ = np.histogram(mass_diff, bins=diff_bins, density=True)
             results["histograms/jet_mass_diff_counts"] = counts_mdiff
@@ -239,7 +242,8 @@ class PhysicsEvaluator:
 
             # ---------------- Plot 3.3: Tau32 Diff ----------------
             tau_diff = reco_tau32s - true_tau32s
-            tau_bins = np.linspace(-1, 1, 50) # Tau ranges [0,1], diff must be [-1,1]
+            #tau_bins = np.linspace(-1, 1, 50) # Tau ranges [0,1], diff must be [-1,1]
+            tau_bins = np.linspace(-0.4, 0.4, 100) # Tau ranges [0,1], diff must be [-1,1]
 
             counts_tdiff, _ = np.histogram(tau_diff, bins=tau_bins, density=True)
             results["histograms/tau32_diff_counts"] = counts_tdiff

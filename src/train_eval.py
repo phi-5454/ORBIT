@@ -1,3 +1,4 @@
+from datetime import datetime
 import os
 
 import fastjet
@@ -16,6 +17,23 @@ from data_loading import ParquetDataModule, feature_cols
 from lightning_defs import PHA_FSQ_VAE
 from torch_modules import *
 from lightning.pytorch.callbacks import ModelSummary
+import datetime
+import uuid
+
+def make_run_name(base_name=None):
+    if base_name is None:
+        return None
+
+    # 1. Generate a sortable timestamp (e.g., "20260329_174411")
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    # 2. Generate a short, unique random ID (e.g., "4f8a2c")
+    short_id = uuid.uuid4().hex[:6]
+
+    # 3. Construct the final name
+    # Result looks like: "baseline_vae_20260329_174411_4f8a2c"
+    unique_run_name = f"{base_name}_{timestamp}_{short_id}"
+    return unique_run_name
 
 class TrainPipeline:
     # TODO: handle all the params
@@ -42,9 +60,13 @@ class TrainPipeline:
         self.logger = L.pytorch.loggers.WandbLogger(
             project=os.getenv("WANDB_PROJECT"),
             entity=os.getenv("WANDB_ENTITY"),
-            # name="whole_event_pha_fsq",
+            name=make_run_name(config["run_name"]),
             log_model="all",  # Note: If checkpoints become too large, set this to False
         )
+
+        # Upload config to wandb.
+        self.logger.experiment.config.update(self.config)
+
 
         # Init callbacks
         lr_monitor = LearningRateMonitor(logging_interval="step")
@@ -65,7 +87,9 @@ class TrainPipeline:
         # model = PHA_FSQ_VAE(input_dim=3, hidden_dim=64, lr=1e-3)
         model_cfg = self.config["model"]
         model_cfg["input_dim"] = 3 # TODO: automate this 
-        model = PHA_FSQ_VAE(model_cfg)
+
+        # TODO: Handle the outpts more centrally
+        model = PHA_FSQ_VAE(model_cfg, self.config["output_dir"])
         # model = PHA_FSQ_VAE(
         # input_dim=len(feature_cols),
         # hidden_dim=model_cfg["hidden_dim"],

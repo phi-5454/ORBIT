@@ -14,10 +14,13 @@ import wandb
 
 
 class PHA_FSQ_VAE(L.LightningModule):
-    def __init__(self, model_cfg):
+    def __init__(self, model_cfg, output_dir):
         super().__init__()
         self.model_cfg = model_cfg
+        self.output_dir = output_dir
         self.save_hyperparameters()
+
+        self.total_train_events_seen = 0
 
         dim_mu = len(model_cfg["fsq_mu_levels"])
         dim_alpha = len(model_cfg["fsq_alpha_levels"])
@@ -202,7 +205,7 @@ class PHA_FSQ_VAE(L.LightningModule):
                         f"{prefix}_plots/{key}", fig, global_step=self.global_step
                     )
                 else:
-                    os.makedirs("local_debug_plots", exist_ok=True)
+                    os.makedirs(self.output_dir + "/" +"local_debug_plots", exist_ok=True)
                     fig.savefig(
                         f"local_debug_plots/{prefix}_{key.replace('/', '_')}_step_{self.global_step}.png"
                     )
@@ -219,7 +222,7 @@ class PHA_FSQ_VAE(L.LightningModule):
         # 4. Save the collected histograms to disk
         # ==========================================
         if histograms_to_save:
-            save_dir = "saved_histograms"
+            save_dir = self.output_dir + "/" + "saved_histograms"
             os.makedirs(save_dir, exist_ok=True)
             
             # Format: saved_histograms/val_hists_step_15000.npz
@@ -259,6 +262,8 @@ class PHA_FSQ_VAE(L.LightningModule):
             x, mask, beta=0.25
         )
 
+        self.total_train_events_seen += x.shape[0]
+
         # Logging
         self.log_dict(
             {
@@ -269,6 +274,13 @@ class PHA_FSQ_VAE(L.LightningModule):
                 "commit_alpha": loss_amp,
             },
             prog_bar=True,
+        )
+        self.log(
+            "events_seen", 
+            float(self.total_train_events_seen), 
+            on_step=True, 
+            on_epoch=False, 
+            prog_bar=False  # Keeps your terminal progress bar clean
         )
 
         return loss_pha
