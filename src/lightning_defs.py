@@ -276,7 +276,7 @@ class PHA_FSQ_VAE(L.LightningModule):
             prog_bar=True,
         )
         self.log(
-            "events_seen", 
+            "global/events_seen", 
             float(self.total_train_events_seen), 
             on_step=True, 
             on_epoch=False, 
