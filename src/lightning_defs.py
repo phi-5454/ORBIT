@@ -76,10 +76,21 @@ class PHA_FSQ_VAE(L.LightningModule):
     def forward(self, x, mask):
         # 1. Encode
         x_proj = self.input_proj(x)
+
+        if(not torch.isfinite(x_proj).all().item()):
+            print("111_")
         z_encoded = self.encoder(x_proj, mask, use_attention=self.model_cfg["use_attention"])
+        if(not torch.isfinite(z_encoded).all().item()):
+            print("222_")
 
         # 2. Split
         z_mu, z_alpha = self.phi(z_encoded)
+        if(not torch.isfinite(z_mu).all().item()):
+            print("333_")
+        if(not torch.isfinite(z_mu).all().item()):
+            print("333_")
+        if(not torch.isfinite(z_alpha).all().item()):
+            print("444_")
 
         # 3. Quantize
         if(self.model_cfg["skip_quantization"]==True):
@@ -89,17 +100,29 @@ class PHA_FSQ_VAE(L.LightningModule):
             z_decoded = self.psi(z_mu, z_alpha)
         else:
             z_hat_mu = self.quantizer_mu(z_mu)
+            if(not torch.isfinite(z_hat_mu).all().item()):
+                print("eeeee_")
             z_hat_alpha = self.quantizer_alpha(z_alpha)
+            if(not torch.isfinite(z_hat_alpha).all().item()):
+                print("aaaaa_")
 
             # 4. Straight Through Estimator (STE)
             # TODO: abstract this away 
             z_ste_mu = z_mu + (z_hat_mu - z_mu).detach()
+            if(not torch.isfinite(z_ste_mu).all().item()):
+                print("ooooo_")
             z_ste_alpha = z_alpha + (z_hat_alpha - z_alpha).detach()
+            if(not torch.isfinite(z_ste_alpha).all().item()):
+                print("iiii_")
 
             # 5. Merge and Decode
             z_decoded = self.psi(z_ste_mu, z_ste_alpha)
+            if(not torch.isfinite(z_decoded).all().item()):
+                print("uuuu_")
 
         x_hat_lat = self.decoder(z_decoded, mask, self.model_cfg["use_attention"])
+        if(not torch.isfinite(x_hat_lat).all().item()):
+            print("kkkkk_")
         x_hat = self.output_proj(x_hat_lat)
 
         return x_hat, z_mu, z_hat_mu, z_alpha, z_hat_alpha
