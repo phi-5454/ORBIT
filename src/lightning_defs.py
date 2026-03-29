@@ -124,6 +124,8 @@ class PHA_FSQ_VAE(L.LightningModule):
         if(not torch.isfinite(x_hat_lat).all().item()):
             print("kkkkk_")
         x_hat = self.output_proj(x_hat_lat)
+        if(not torch.isfinite(x_hat).all().item()):
+            print("qqqqqq_")
 
         return x_hat, z_mu, z_hat_mu, z_alpha, z_hat_alpha
 
