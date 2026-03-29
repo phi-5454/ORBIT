@@ -136,6 +136,18 @@ class PHA_FSQ_VAE(L.LightningModule):
             Assuming x shape is [Batch, Particles, Features] and phi is at phi_idx.
             """
             x_hat, z_mu, z_hat_mu, z_alpha, z_hat_alpha = self(x, mask)
+            if(not torch.isfinite(x_hat).all().item()):
+                print("111")
+            if(not torch.isfinite(z_mu).all().item()):
+                print("222")
+            if(not torch.isfinite(z_hat_mu).all().item()):
+                print("333")
+            if(not torch.isfinite(z_alpha).all().item()):
+                print("444")
+            if(not torch.isfinite(z_hat_alpha).all().item()):
+                print("555")
+            if(not torch.isfinite(x).all().item()):
+                print("666")
             
             mask_3d = mask.unsqueeze(-1).expand_as(x)
 
