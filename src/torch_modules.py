@@ -209,15 +209,23 @@ class NormformerBlock(nn.Module):
         
         if use_attention:
             x = self.ln1(x)
+            if(not torch.isfinite(x).all().item()):
+                print("..._0")
             # Attention
             #x, _ = self.self_attn(x, x, x, key_padding_mask=mask)
             x, attn_weights = self.self_attn(x, x, x, key_padding_mask=mask)
+            if(not torch.isfinite(x).all().item()):
+                print("..._1")
             
             # Post-norm (Normformer specific)
             x = self.ln_post_attn(x)
+            if(not torch.isfinite(x).all().item()):
+                print("..._2")
             
             # Residual
             x = residual + x
+            if(not torch.isfinite(x).all().item()):
+                print("..._3")
         else:
             x = residual
         
@@ -225,12 +233,18 @@ class NormformerBlock(nn.Module):
         # Pre-norm
         residual = x
         x = self.ln2(x)
+        if(not torch.isfinite(x).all().item()):
+            print("..._4")
         
         # MLP
         x = self.ff(x)
+        if(not torch.isfinite(x).all().item()):
+            print("..._6")
         
         # Post-norm (Normformer specific)
         x = self.ln_post_ff(x)
+        if(not torch.isfinite(x).all().item()):
+            print("..._7")
         
         # Residual
         x = residual + x
