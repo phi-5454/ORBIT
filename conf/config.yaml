@@ -16,3 +16,5 @@ run_test: False
 earlystopping_patience: 5
 num_dataload_workers: 0
 replot_only: False
+mode: "train" #or "test_only"
+ckpt_path: "./some_model.ckpt" # to load model from for test_only.

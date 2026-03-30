@@ -54,8 +54,8 @@ def replot_jet_structure(npz_files, run_labels, output_dir="replot_outputs"):
     # ==========================================
     # 2. Kinematic Features (Eta, Phi, pT)
     # ==========================================
-    fig_kin, axes_kin = plt.subplots(1, 3, figsize=(18, 5))
-    fig_kin.suptitle("Kinematics: Original vs. Reconstructed Sweeps", fontsize=16)
+    fig_kin, axes_kin = plt.subplots(1, 3, figsize=(18, 6))
+    fig_kin.suptitle("Kinematics: Original vs. Reconstructed Sweeps", fontsize=14)
     
     features = ["Eta", "Phi", "pT"]
     for i, feat in enumerate(features):
@@ -72,7 +72,7 @@ def replot_jet_structure(npz_files, run_labels, output_dir="replot_outputs"):
         for j, data in enumerate(runs_data):
             mh.histplot(
                 data[f"{feat}_reco_counts"], 
-                bins=bins, ax=axes_kin[i], label=f"Reco ({run_labels[j]})", 
+                bins=bins, ax=axes_kin[i], label=f"{run_labels[j]}", 
                 color=colors[j % len(colors)], histtype='step', linewidth=2
             )
             
@@ -159,7 +159,7 @@ def replot_jet_structure(npz_files, run_labels, output_dir="replot_outputs"):
                 histtype='step', linewidth=2
             )
         axs_sub[1].axvline(0, color='black', linestyle='--', alpha=0.5)
-        axs_sub[1].set_xlabel(r"Jet Mass Difference: $M^{reco} - M^{orig}$ [GeV]")
+        axs_sub[1].set_xlabel(r"$M^{reco} - M^{orig}$ [GeV]")
         axs_sub[1].set_ylabel("Density")
         axs_sub[1].legend()
 
@@ -172,7 +172,7 @@ def replot_jet_structure(npz_files, run_labels, output_dir="replot_outputs"):
                 histtype='step', linewidth=2
             )
         axs_sub[2].axvline(0, color='black', linestyle='--', alpha=0.5)
-        axs_sub[2].set_xlabel(r"$\tau_{32}$ Difference: $\tau_{32}^{reco} - \tau_{32}^{orig}$")
+        axs_sub[2].set_xlabel(r"$\tau_{32}^{reco} - \tau_{32}^{orig}$")
         axs_sub[2].set_ylabel("Density")
         axs_sub[2].legend()
 

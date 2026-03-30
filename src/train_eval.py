@@ -80,9 +80,9 @@ class TrainPipeline:
 
     def run(self, run_validation=True, run_test=False):
 
+        mode=self.config["mode"]
         # TODO: Assumes a wandb logger
         wandb_active_config = dict(self.logger.experiment.config)
-
         # Initialize Model
         # model = PHA_FSQ_VAE(input_dim=3, hidden_dim=64, lr=1e-3)
         model_cfg = self.config["model"]
@@ -100,14 +100,25 @@ class TrainPipeline:
         # Tell the logger to "watch" the model's gradients and weights
         self.logger.watch(model, log="all", log_freq=10, log_graph=True)
 
-        # Train the model
-        self.trainer.fit(model, datamodule=self.datamodule)
+        if mode == "train":
 
-        if run_validation:
-            self.trainer.validate(model, datamodule=self.datamodule)
+            # Train the model
+            self.trainer.fit(model, datamodule=self.datamodule)
 
-        if run_test:
-            self.trainer.test(model, datamodule=self.datamodule)
+            if run_validation:
+                self.trainer.validate(model, datamodule=self.datamodule)
+
+            if run_test:
+                self.trainer.test(model, datamodule=self.datamodule)
+
+        if mode == "test_only":
+            print(f"Skipping training. Loading weights from: {self.config["ckpt_path"]}")
+        
+            # PyTorch Lightning handles the weight loading automatically!
+            # You do NOT need to do model.load_state_dict() manually.
+            self.trainer.test(model, datamodule=self.datamodule, ckpt_path=self.config["ckpt_path"])
+
+
 
         # TODO: assumes a WandB logger
         self.logger.experiment.unwatch(model)

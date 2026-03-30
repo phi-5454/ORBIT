@@ -5,5 +5,5 @@ in_files:
     "saved_histograms/val_hists_step_2.npz",
     "saved_histograms/val_hists_step_1.npz",
   ]
-run_labels: ["1", "2", "3"]
+run_labels: ["FSQ(10x10x10)", "FSQ(21x21x21)", "FSQ(32x32x32)"]
 output_dir: "replot_outputs"
