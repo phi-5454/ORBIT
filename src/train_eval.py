@@ -62,6 +62,7 @@ class TrainPipeline:
             entity=os.getenv("WANDB_ENTITY"),
             name=make_run_name(config["run_name"]),
             log_model="all",  # Note: If checkpoints become too large, set this to False
+            save_dir=config["output_dir"]
         )
 
         # Upload config to wandb.

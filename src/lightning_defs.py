@@ -263,6 +263,7 @@ class PHA_FSQ_VAE(L.LightningModule):
             x, mask, beta=0.25
         )
 
+        # TODO: Make the increment only for the first epoch
         self.total_train_events_seen += x.shape[0]
 
         # Logging
