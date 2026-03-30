@@ -47,7 +47,7 @@ def replot_jet_structure(npz_files, run_labels, output_dir="replot_outputs"):
     ax_pt_res.set_xlabel(r"Fractional $p_T$ Resolution: $(p_T^{reco} - p_T^{true}) / p_T^{true}$")
     ax_pt_res.set_ylabel("Density / Number of Jets")
     ax_pt_res.set_title("Jet Transverse Momentum Recovery")
-    ax_pt_res.legend()
+    ax_pt_res.legend(prop={'size': 10})
     fig_pt_res.savefig(os.path.join(output_dir, "combined_jet_pt_resolution.png"))
     plt.close(fig_pt_res)
 
@@ -81,7 +81,7 @@ def replot_jet_structure(npz_files, run_labels, output_dir="replot_outputs"):
             
         axes_kin[i].set_title(f"{feat} Distribution")
         axes_kin[i].set_ylabel("Density")
-        axes_kin[i].legend()
+        axes_kin[i].legend(prop={'size': 10})
 
     plt.tight_layout()
     fig_kin.savefig(os.path.join(output_dir, "combined_kinematics.png"))
@@ -107,7 +107,7 @@ def replot_jet_structure(npz_files, run_labels, output_dir="replot_outputs"):
     axs_e[0].set_title("Energy Distribution (m=0)")
     axs_e[0].set_xscale("log")
     axs_e[0].set_ylabel("Density")
-    axs_e[0].legend()
+    axs_e[0].legend(prop={'size': 10})
 
     # 3.2 Energy Residuals
     bins_e_res = ref_data["energy_residuals_bins"]
@@ -120,7 +120,7 @@ def replot_jet_structure(npz_files, run_labels, output_dir="replot_outputs"):
     axs_e[1].axvline(0, color='black', linestyle='--', alpha=0.5)
     axs_e[1].set_title(r"Energy Residuals: $E^{reco} - E^{orig}$")
     axs_e[1].set_ylabel("Density")
-    axs_e[1].legend()
+    axs_e[1].legend(prop={'size': 10})
 
     plt.tight_layout()
     fig_energy.savefig(os.path.join(output_dir, "combined_energy.png"))
@@ -148,7 +148,7 @@ def replot_jet_structure(npz_files, run_labels, output_dir="replot_outputs"):
             )
         axs_sub[0].set_xlabel("Jet Mass [GeV]")
         axs_sub[0].set_ylabel("Density")
-        axs_sub[0].legend()
+        axs_sub[0].legend(prop={'size': 10})
 
         # 4.2 Jet Mass Difference
         bins_mass_diff = ref_data["jet_mass_diff_bins"]
@@ -161,7 +161,7 @@ def replot_jet_structure(npz_files, run_labels, output_dir="replot_outputs"):
         axs_sub[1].axvline(0, color='black', linestyle='--', alpha=0.5)
         axs_sub[1].set_xlabel(r"$M^{reco} - M^{orig}$ [GeV]")
         axs_sub[1].set_ylabel("Density")
-        axs_sub[1].legend()
+        axs_sub[1].legend(prop={'size': 10})
 
         # 4.3 Tau32 Difference
         bins_tau_diff = ref_data["tau32_diff_bins"]
@@ -174,7 +174,7 @@ def replot_jet_structure(npz_files, run_labels, output_dir="replot_outputs"):
         axs_sub[2].axvline(0, color='black', linestyle='--', alpha=0.5)
         axs_sub[2].set_xlabel(r"$\tau_{32}^{reco} - \tau_{32}^{orig}$")
         axs_sub[2].set_ylabel("Density")
-        axs_sub[2].legend()
+        axs_sub[2].legend(prop={'size': 10})
 
         plt.tight_layout()
         fig_sub.savefig(os.path.join(output_dir, "combined_substructure.png"))
