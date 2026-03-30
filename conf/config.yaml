@@ -14,3 +14,4 @@ run_validation: True
 run_test: False
 earlystopping_patience: 5
 num_dataload_workers: 0
+replot_only: False

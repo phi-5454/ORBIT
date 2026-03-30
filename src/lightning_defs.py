@@ -23,10 +23,10 @@ class PHA_FSQ_VAE(L.LightningModule):
         self.total_train_events_seen = 0
         self.test_step_outputs = []
 
-        dim_mu = len(model_cfg["fsq_mu_levels"])
-        dim_alpha = len(model_cfg["fsq_alpha_levels"])
+        self.dim_mu = len(model_cfg["fsq_mu_levels"])
+        self.dim_alpha = len(model_cfg["fsq_alpha_levels"])
 
-        codebook_dim = dim_mu + dim_alpha
+        codebook_dim = self.dim_mu + self.dim_alpha
         in_dim = model_cfg["input_dim"]
         hidden_dim = model_cfg["hidden_dim"]
         num_heads = model_cfg["num_heads"]
@@ -58,13 +58,13 @@ class PHA_FSQ_VAE(L.LightningModule):
         '''
 
         # TODO: Rework phi
-        self.phi = tm.Phi(dim_in=hidden_dim, dim_alpha=dim_alpha, dim_mu=dim_mu)
+        self.phi = tm.Phi(dim_in=hidden_dim, dim_alpha=self.dim_alpha, dim_mu=self.dim_mu)
 
         self.quantizer_mu = tm.FSQ(levels=model_cfg["fsq_mu_levels"])
         self.quantizer_alpha = tm.FSQ(levels=model_cfg["fsq_alpha_levels"])
 
         # TODO: Rework psi
-        self.psi = tm.Psi(dim_mu=dim_mu, dim_alpha=dim_alpha, dim_out=hidden_dim)
+        self.psi = tm.Psi(dim_mu=self.dim_mu, dim_alpha=self.dim_alpha, dim_out=hidden_dim)
 
         '''
         self.decoder = tm.ParticleSetDecoder(
@@ -165,8 +165,9 @@ class PHA_FSQ_VAE(L.LightningModule):
             loss_l2 = (loss_l2_full * mask_3d).sum() / mask_3d.sum().clamp(min=1.0)
 
             # 5. Calculate latent losses (unchanged)
-            loss_commitment = F.mse_loss(z_mu, z_hat_mu.detach())
-            loss_amplitude = F.mse_loss(z_alpha, z_hat_alpha.detach())
+            loss_commitment = F.mse_loss(z_mu, z_hat_mu.detach()) if self.dim_mu > 0 else 0
+
+            loss_amplitude = F.mse_loss(z_alpha, z_hat_alpha.detach()) if self.dim_alpha > 0 else 0
 
             # 6. Total loss
             loss_pha = loss_abs + (beta * loss_commitment) + loss_amplitude

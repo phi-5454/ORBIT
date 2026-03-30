@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 from omegaconf import DictConfig, OmegaConf
 
 import wandb
+from plotting import replot_results
 from train_eval import TrainPipeline
 
 # from train_eval import TrainPipeline
@@ -21,6 +22,10 @@ RESOURCE_DIR = BASE_DIR / "resources"
     version_base=None, config_path=str(BASE_DIR / "conf"), config_name="config.yaml"
 )
 def main(cfg: DictConfig):
+    if(cfg["replot_only"]):
+        replot_results(cfg["output_dir"], output_filename=f"{cfg["run_name"]}_combined.png")
+        return
+
     BASE_DIR = Path(__file__).resolve().parent.parent
     SRC_DIR = BASE_DIR / "src"
     RESOURCE_DIR = BASE_DIR / "resources"
