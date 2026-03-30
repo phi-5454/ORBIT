@@ -7,8 +7,10 @@ from dotenv import load_dotenv
 from omegaconf import DictConfig, OmegaConf
 
 import wandb
-from plotting import replot_results
+from plotting import replot_jet_structure
 from train_eval import TrainPipeline
+import datetime
+import uuid
 
 # from train_eval import TrainPipeline
 
@@ -17,15 +19,32 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SRC_DIR = BASE_DIR / "src"
 RESOURCE_DIR = BASE_DIR / "resources"
 
+def make_run_name(base_name=None):
+    if base_name is None:
+        return None
+
+    # 1. Generate a sortable timestamp (e.g., "20260329_174411")
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    # 2. Generate a short, unique random ID (e.g., "4f8a2c")
+    short_id = uuid.uuid4().hex[:6]
+
+    # 3. Construct the final name
+    # Result looks like: "baseline_vae_20260329_174411_4f8a2c"
+    unique_run_name = f"{base_name}_{timestamp}_{short_id}"
+    return unique_run_name
 
 @hydra.main(
     version_base=None, config_path=str(BASE_DIR / "conf"), config_name="config.yaml"
 )
 def main(cfg: DictConfig):
     if(cfg["replot_only"]):
-        replot_results(cfg["output_dir"], output_filename=f"{cfg["run_name"]}_combined.png")
+        npz_files = [f"{cfg["replot"]["in_base_dir"]}/{f}" for f in cfg["replot"]["in_files"]]
+        # TODO: Put the output plots into the original run's directory.
+        replot_jet_structure(npz_files=npz_files, run_labels=cfg["replot"]["run_labels"], output_dir=f"{cfg["replot"]["in_base_dir"]}/combined_plots")
         return
 
+    unique_run_name = make_run_name(cfg["run_name"])
     BASE_DIR = Path(__file__).resolve().parent.parent
     SRC_DIR = BASE_DIR / "src"
     RESOURCE_DIR = BASE_DIR / "resources"
@@ -51,6 +70,7 @@ def main(cfg: DictConfig):
     # TODO: pass a sub-part of the config
     p = TrainPipeline(
         config=config,
+        unique_run_name=unique_run_name,
         train_val_files=lines_train_val,
         test_files=lines_test,
     )

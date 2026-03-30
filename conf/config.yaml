@@ -2,6 +2,7 @@ defaults:
   - hyperparams: default_hyperparams.yaml
   - trainer: default_trainer.yaml
   - model: default_model.yaml
+  - replot: default_replot.yaml
 
 run_name: "test_run"
 wandb_env: "../wandb_api_key.env"

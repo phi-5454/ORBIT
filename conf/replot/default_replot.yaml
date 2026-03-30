@@ -1,0 +1,9 @@
+in_base_dir: "./outputs/test_run_20260330_114817_934ae4/"
+in_files:
+  [
+    "saved_histograms/test_hists_step_2.npz",
+    "saved_histograms/val_hists_step_2.npz",
+    "saved_histograms/val_hists_step_1.npz",
+  ]
+run_labels: ["1", "2", "3"]
+output_dir: "replot_outputs"

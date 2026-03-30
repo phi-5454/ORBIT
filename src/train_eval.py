@@ -17,8 +17,6 @@ from data_loading import ParquetDataModule, feature_cols
 from lightning_defs import PHA_FSQ_VAE
 from torch_modules import *
 from lightning.pytorch.callbacks import ModelSummary
-import datetime
-import uuid
 
 def make_run_name(base_name=None):
     if base_name is None:
@@ -37,7 +35,7 @@ def make_run_name(base_name=None):
 
 class TrainPipeline:
     # TODO: handle all the params
-    def __init__(self, config, train_val_files=[], test_files=[]) -> None:
+    def __init__(self, config, unique_run_name, train_val_files=[], test_files=[]) -> None:
         self.config = config
         train_val_split = np.array(self.config["train_val_split"])
         train_val_split_norm = train_val_split / np.sum(train_val_split)
@@ -55,12 +53,13 @@ class TrainPipeline:
 
         self.datamodule = ParquetDataModule(train_files.tolist(), val_files.tolist(), test_files, window_particles=config["model"]["window_particles"], num_workers=config["num_dataload_workers"])
 
+        self.unique_run_name = unique_run_name
 
         # TODO: We assume we want to log with WandB.
         self.logger = L.pytorch.loggers.WandbLogger(
             project=os.getenv("WANDB_PROJECT"),
             entity=os.getenv("WANDB_ENTITY"),
-            name=make_run_name(config["run_name"]),
+            name=self.unique_run_name,
             log_model="all",  # Note: If checkpoints become too large, set this to False
             save_dir=config["output_dir"]
         )
@@ -90,7 +89,8 @@ class TrainPipeline:
         model_cfg["input_dim"] = 3 # TODO: automate this 
 
         # TODO: Handle the outpts more centrally
-        model = PHA_FSQ_VAE(model_cfg, self.config["output_dir"])
+        output_dir = f"{self.config["output_dir"]}/{self.unique_run_name}"
+        model = PHA_FSQ_VAE(model_cfg, output_dir=output_dir)
         # model = PHA_FSQ_VAE(
         # input_dim=len(feature_cols),
         # hidden_dim=model_cfg["hidden_dim"],
