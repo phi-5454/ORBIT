@@ -56,7 +56,10 @@ def replot_jet_structure(npz_files, run_labels, output_dir="replot_outputs"):
     # ==========================================
     fig_kin, axes_kin = plt.subplots(1, 3, figsize=(18, 6))
     fig_kin.suptitle("Kinematics: Original vs. Reconstructed Sweeps", fontsize=14)
+
     
+    # log plot for pt
+    axes_kin[2].set_yscale('log')
     features = ["Eta", "Phi", "pT"]
     for i, feat in enumerate(features):
         bins = ref_data[f"{feat}_bins"]
@@ -159,7 +162,7 @@ def replot_jet_structure(npz_files, run_labels, output_dir="replot_outputs"):
                 histtype='step', linewidth=2
             )
         axs_sub[1].axvline(0, color='black', linestyle='--', alpha=0.5)
-        axs_sub[1].set_xlabel(r"$M^{reco} - M^{orig}$ [GeV]")
+        axs_sub[1].set_xlabel(r"Jet $m^{reco} - m^{orig}$ [GeV]")
         axs_sub[1].set_ylabel("Density")
         axs_sub[1].legend(prop={'size': 10})
 
