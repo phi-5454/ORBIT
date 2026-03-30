@@ -55,7 +55,7 @@ def replot_jet_structure(npz_files, run_labels, output_dir="replot_outputs"):
     # 2. Kinematic Features (Eta, Phi, pT)
     # ==========================================
     fig_kin, axes_kin = plt.subplots(1, 3, figsize=(18, 6))
-    fig_kin.suptitle("Kinematics: Original vs. Reconstructed Sweeps", fontsize=14)
+    fig_kin.suptitle("Kinematics: Original vs. Reconstructed Sweeps", fontsize=16)
 
     
     # log plot for pt
