@@ -7,7 +7,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data import IterableDataset, DataLoader, get_worker_info
-import awkward as ak
 
 # TODO: This is a bit farouche
 feature_cols = ["L1T_PUPPIPart_Eta", "L1T_PUPPIPart_Phi", "L1T_PUPPIPart_PT", "L1T_PUPPIPart_PID", "L1T_PUPPIPart_PuppiW"]
@@ -48,38 +47,48 @@ class UniformQuantizerSTE(nn.Module):
         return x + (x_quantized - x).detach()
 
 class PreprocessTranformer:
+    # TODO: Integrate the PUPPI_weight cut
+    # TODO: This is all hardcoded for now
     def __init__(self, epsilon=1e-8):
         self.epsilon = epsilon
+        self.col_name = "L1T_PUPPIPart_PT"
+        # Find the integer index of the transformed column for tensor operations later
+        self.col_idx = feature_cols.index(self.col_name) if self.col_name else None
 
-    def forward_awkward(self, ak_array):
-        """Applies the forward transform to the Awkward Array (vectorized)."""
-        # We need to make a copy if we don't want to modify the original Arrow-backed array
-        # or just return a new record.
-        new_fields = {}
-        for field in ak_array.fields:
-            if field == "L1T_PUPPIPart_PT":
-                new_fields[field] = np.log(ak_array[field] + self.epsilon) - 1.8
-            elif field == "L1T_PUPPIPart_Phi":
-                new_fields[field] = ak_array[field] / np.pi
-            elif field == "L1T_PUPPIPart_Eta":
-                new_fields[field] = ak_array[field] / 3
-            else:
-                new_fields[field] = ak_array[field]
-        
-        return ak.Array(new_fields)
+    # TODO: trasnform to realistic bit depth.
+    def truncate_quantize(self, df):
+        # ..truncate an quantize the given features
+        pass
+
+    def forward_dataframe(self, df):
+
+
+        """Applies the forward transform to the Pandas DataFrame before training."""
+        #if self.col_name and self.col_name in df.columns:
+
+        # Apply same transforms as OmniJet
+        df["L1T_PUPPIPart_PT"] = df["L1T_PUPPIPart_PT"].apply(
+                lambda x: np.log(np.asarray(x) + self.epsilon) - 1.8
+                )
+        df["L1T_PUPPIPart_Phi"] = df["L1T_PUPPIPart_Phi"] / np.pi
+        df["L1T_PUPPIPart_Eta"] = df["L1T_PUPPIPart_Eta"] / 3
+
+        return df
 
     def inverse_tensor(self, tensor):
         """Applies the inverse transform to the PyTorch prediction tensor."""
         # Create a clone to avoid in-place modification issues during backprop
         tensor_inv = tensor.clone()
         tensor_inv[..., 2] = (
-            torch.exp(tensor[..., 2] + 1.8) - self.epsilon
+            torch.exp(tensor[..., 2]) - self.epsilon + 1.8
         )
         tensor_inv[..., 0] = tensor[..., 0] * 3
         # Azimuthal angle, Modulo 2pi
         tensor_inv[..., 1] = (tensor[..., 1] * torch.pi + torch.pi) % (2 * torch.pi) - torch.pi
         
         return tensor_inv
+
+        return tensor
 
 
 
@@ -91,7 +100,6 @@ class ParquetFeatureDataset(IterableDataset):
         self.selected_features = selected_features or ["L1T_PUPPIPart_Eta", "L1T_PUPPIPart_Phi", "L1T_PUPPIPart_PT"]
         self.max_particles = max_particles
         self.batch_size = batch_size
-        self.preprocess = PreprocessTranformer()
 
     @profile
     def __iter__(self):
@@ -103,8 +111,13 @@ class ParquetFeatureDataset(IterableDataset):
         if worker_info is not None:
             worker_id = worker_info.id
             num_workers = worker_info.num_workers
+            
+            # Slice the file list: start at worker_id, step by num_workers
             files = files[worker_id::num_workers]
-            if not files: return
+            
+            # Edge case: If there are more workers than files, some workers get nothing
+            if not files:
+                return
 
         # 3. CREATE A WORKER-SPECIFIC DATASET
         worker_dataset = ds.dataset(files, format="parquet")
@@ -115,49 +128,58 @@ class ParquetFeatureDataset(IterableDataset):
         )
 
         for batch in batches:
-            # 1. Convert Arrow RecordBatch to Awkward Array
-            ak_batch = ak.from_arrow(batch)
-            
-            # 2. Apply Preprocessing (vectorized)
-            ak_batch = self.preprocess.forward_awkward(ak_batch)
-            
-            # 3. Filtering by PUPPI weight
+            df = batch.to_pandas()
+            df = PreprocessTranformer().forward_dataframe(df)
+
+            event_tensors = []
             PUPPI_cutoff = 0.05
-            if "L1T_PUPPIPart_PuppiW" in ak_batch.fields:
-                # This applies the mask to each list in the batch
-                mask = ak_batch["L1T_PUPPIPart_PuppiW"] > PUPPI_cutoff
-                ak_batch = ak_batch[mask]
             
-            # Remove empty events
-            ak_batch = ak_batch[ak.num(ak_batch[self.selected_features[0]]) > 0]
-            if len(ak_batch) == 0:
+            # Map selected features to their data
+            cols_to_zip = [df[f] for f in self.selected_features]
+            
+            # We always need PuppiW for the mask if available
+            has_puppi = "L1T_PUPPIPart_PuppiW" in df.columns
+            if has_puppi:
+                puppiw_data = df["L1T_PUPPIPart_PuppiW"]
+            else:
+                puppiw_data = [None] * len(df)
+
+            for i, zipped_row in enumerate(zip(*cols_to_zip)):
+                if has_puppi:
+                    puppiw_arr = puppiw_data.iloc[i]
+                    PUPPI_mask = puppiw_arr > PUPPI_cutoff
+                else:
+                    # Fallback if PuppiW is not present
+                    PUPPI_mask = np.ones_like(zipped_row[0], dtype=bool)
+
+                if len(zipped_row[0]) == 0:
+                    continue
+
+                # Stack the selected features for masked particles
+                coords = np.column_stack([
+                    f_arr[PUPPI_mask] for f_arr in zipped_row
+                ]).astype(np.float32)
+
+                coords = coords[: self.max_particles]
+                event_tensors.append(torch.tensor(coords))
+
+            if not event_tensors:
                 continue
 
-            # 4. Select and Stack Features
-            # Create a list of arrays, then stack them along a new last axis
-            selected_data = [ak_batch[f][:, :, np.newaxis] for f in self.selected_features]
-            stacked = ak.concatenate(selected_data, axis=-1)
-            
-            # 5. Pad / Truncate to max_particles
-            # ak.pad_none pads along the specified axis. clip=True truncates if longer.
-            padded = ak.pad_none(stacked, self.max_particles, axis=1, clip=True)
-            # Fill Nones with 0.0 to get a regular NumPy-compatible array
-            filled = ak.fill_none(padded, 0.0)
-            
-            # 6. Convert to PyTorch Tensor
-            # Convert to numpy first, then torch.
-            np_batch = ak.to_numpy(filled).astype(np.float32)
-            tensor_batch = torch.from_numpy(np_batch)
-            
-            # 7. Create Mask
-            # The mask should be True for real particles, False for padding.
-            # We can generate it by padding a ones array.
-            ones = ak.ones_like(ak_batch[self.selected_features[0]])
-            mask_padded = ak.pad_none(ones, self.max_particles, axis=1, clip=True)
-            mask_filled = ak.fill_none(mask_padded, 0.0)
-            torch_mask = torch.from_numpy(ak.to_numpy(mask_filled).astype(bool))
+            padded_events = pad_sequence(
+                event_tensors, batch_first=True, padding_value=0.0
+            )
 
-            yield tensor_batch, torch_mask
+            pad_len = self.max_particles - padded_events.shape[1]
+            if pad_len > 0:
+                padded_events = F.pad(padded_events, (0, 0, 0, pad_len), value=0.0)
+
+            # Mask is True for real particles, False for padding
+            # A particle is real if it has non-zero PT (assuming PT is one of the features)
+            # or more generally if any of its features are non-zero.
+            mask = (padded_events != 0).any(dim=-1)
+
+            yield padded_events, mask
 
 
 class ParquetDataModule(L.LightningDataModule):
@@ -170,7 +192,6 @@ class ParquetDataModule(L.LightningDataModule):
         self.selected_features = selected_features or ["L1T_PUPPIPart_Eta", "L1T_PUPPIPart_Phi", "L1T_PUPPIPart_PT"]
         self.window_particles = window_particles
         self.num_workers = num_workers
-        self.prefetch_factor = 4 if num_workers > 0 else None
 
     def train_dataloader(self):
         dataset = ParquetFeatureDataset(self.parquet_dirs_train, self.features, self.selected_features, self.window_particles)
@@ -178,8 +199,8 @@ class ParquetDataModule(L.LightningDataModule):
             dataset, 
             batch_size=None, 
             num_workers=self.num_workers, 
-            persistent_workers=(self.num_workers > 0),
-            prefetch_factor=self.prefetch_factor
+            # FIX: Automatically disables persistence when debugging with 0 workers
+            persistent_workers=(self.num_workers > 0) 
         )
 
     def val_dataloader(self):
@@ -188,15 +209,16 @@ class ParquetDataModule(L.LightningDataModule):
             dataset, 
             batch_size=None, 
             num_workers=self.num_workers, 
-            persistent_workers=(self.num_workers > 0),
-            prefetch_factor=self.prefetch_factor
+            # FIX: Automatically disables persistence when debugging with 0 workers
+            persistent_workers=(self.num_workers > 0)
         )
 
     def test_dataloader(self):
         dataset = ParquetFeatureDataset(self.parquet_dirs_test, self.features, self.selected_features, self.window_particles)
+        # Test loaders generally shouldn't use persistent workers anyway, 
+        # since they only run once at the very end.
         return DataLoader(
             dataset, 
             batch_size=None, 
-            num_workers=self.num_workers,
-            prefetch_factor=self.prefetch_factor
+            num_workers=self.num_workers
         )

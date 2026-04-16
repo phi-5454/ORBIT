@@ -81,13 +81,12 @@ class TrainPipeline:
 
         # Initialize Trainer
         self.trainer = L.Trainer(
-            profiler="simple",
             logger=self.logger,
             callbacks=[lr_monitor, early_stop_callback, ModelSummary(max_depth=-1)],
             **config["trainer"],
+            profiler="simple"
         )
 
-    @profile
     def run(self, run_validation=True, run_test=False):
 
         mode=self.config["mode"]
