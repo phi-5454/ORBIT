@@ -327,6 +327,7 @@ class PHA_FSQ_VAE(L.LightningModule):
 
     '''
 
+    @profile
     def training_step(self, batch, batch_idx):
         # WELD: Unpack the yielded tuple
         x, mask = batch
