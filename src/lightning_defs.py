@@ -26,6 +26,24 @@ class PHA_FSQ_VAE(L.LightningModule):
         self.dim_mu = len(model_cfg["fsq_mu_levels"])
         self.dim_alpha = len(model_cfg["fsq_alpha_levels"])
 
+        self.dim_mu = len(model_cfg["fsq_mu_levels"])
+        self.dim_alpha = len(model_cfg["fsq_alpha_levels"])
+
+        # Calculate total possible codes safely (default to 1 if empty to avoid div by zero)
+        self.total_codes_mu = np.prod(model_cfg["fsq_mu_levels"]) if self.dim_mu > 0 else 1
+        self.total_codes_alpha = np.prod(model_cfg["fsq_alpha_levels"]) if self.dim_alpha > 0 else 1
+        self.total_codes_combined = self.total_codes_mu * self.total_codes_alpha
+
+        # Create persistent sets for Validation
+        self.val_used_codes_mu = set()
+        self.val_used_codes_alpha = set()
+        self.val_used_codes_combined = set()
+
+        # Create persistent sets for Testing
+        self.test_used_codes_mu = set()
+        self.test_used_codes_alpha = set()
+        self.test_used_codes_combined = set()
+
         codebook_dim = self.dim_mu + self.dim_alpha
         in_dim = model_cfg["input_dim"]
         hidden_dim = model_cfg["hidden_dim"]
@@ -77,6 +95,58 @@ class PHA_FSQ_VAE(L.LightningModule):
         self.decoder = tm.NormformerEncoder(num_layers=num_enc_dec_layers, model_dim=hidden_dim, nhead=num_heads, mlp_expansion_factor=nf_mlp_expansion_factor, dropout=nf_dropout)
 
         self.evaluator = PhysicsEvaluator()
+
+    def _track_codebook(self, z_hat_mu, z_hat_alpha, mask, prefix="val"):
+        """Extracts unique codes from the current batch and adds them to the global epoch sets."""
+        z_mu_valid = z_hat_mu[mask]
+        z_alpha_valid = z_hat_alpha[mask]
+
+        # Route to the correct sets
+        if prefix == "val":
+            set_mu, set_alpha, set_comb = self.val_used_codes_mu, self.val_used_codes_alpha, self.val_used_codes_combined
+        else:
+            set_mu, set_alpha, set_comb = self.test_used_codes_mu, self.test_used_codes_alpha, self.test_used_codes_combined
+
+        # 1. Track Mu
+        if self.dim_mu > 0:
+            uniq_mu = torch.unique(z_mu_valid, dim=0).detach().cpu().numpy()
+            for vec in np.round(uniq_mu, decimals=4):
+                set_mu.add(tuple(vec))
+
+        # 2. Track Alpha
+        if self.dim_alpha > 0:
+            uniq_alpha = torch.unique(z_alpha_valid, dim=0).detach().cpu().numpy()
+            for vec in np.round(uniq_alpha, decimals=4):
+                set_alpha.add(tuple(vec))
+
+        # 3. Track Combined Space (The true cross-product utilization)
+        if self.dim_mu > 0 and self.dim_alpha > 0:
+            z_combined = torch.cat([z_mu_valid, z_alpha_valid], dim=-1)
+            uniq_combined = torch.unique(z_combined, dim=0).detach().cpu().numpy()
+            for vec in np.round(uniq_combined, decimals=4):
+                set_comb.add(tuple(vec))
+
+    def _log_and_clear_utilization(self, prefix="val"):
+        """Calculates utilization percentages, logs them, and safely clears the sets."""
+        if prefix == "val":
+            set_mu, set_alpha, set_comb = self.val_used_codes_mu, self.val_used_codes_alpha, self.val_used_codes_combined
+        else:
+            set_mu, set_alpha, set_comb = self.test_used_codes_mu, self.test_used_codes_alpha, self.test_used_codes_combined
+
+        if self.dim_mu > 0:
+            self.log(f"{prefix}_metrics/utilization_mu", len(set_mu) / self.total_codes_mu, sync_dist=True)
+            self.log(f"{prefix}_metrics/active_codes_mu", float(len(set_mu)), sync_dist=True)
+            set_mu.clear()
+
+        if self.dim_alpha > 0:
+            self.log(f"{prefix}_metrics/utilization_alpha", len(set_alpha) / self.total_codes_alpha, sync_dist=True)
+            self.log(f"{prefix}_metrics/active_codes_alpha", float(len(set_alpha)), sync_dist=True)
+            set_alpha.clear()
+
+        if self.dim_mu > 0 and self.dim_alpha > 0:
+            self.log(f"{prefix}_metrics/utilization_combined", len(set_comb) / self.total_codes_combined, sync_dist=True)
+            self.log(f"{prefix}_metrics/active_codes_combined", float(len(set_comb)), sync_dist=True)
+            set_comb.clear()
 
     def forward(self, x, mask):
         # 1. Encode
@@ -172,7 +242,7 @@ class PHA_FSQ_VAE(L.LightningModule):
             # 6. Total loss
             loss_pha = loss_abs + (beta * loss_commitment) + loss_amplitude
 
-            return loss_pha, loss_l2, loss_abs, loss_commitment, loss_amplitude, x_hat
+            return loss_pha, loss_l2, loss_abs, loss_commitment, loss_amplitude, x_hat, z_hat_mu, z_hat_alpha
 
 
 
@@ -260,7 +330,7 @@ class PHA_FSQ_VAE(L.LightningModule):
 
         # Forward Pass
         # x_hat, z_mu, z_hat_mu, z_alpha, z_hat_alpha = self(x, mask)
-        loss_pha, loss_l2, loss_abs, loss_commit, loss_amp, _ = self.compute_losses(
+        loss_pha, loss_l2, loss_abs, loss_commit, loss_amp, _, _, _ = self.compute_losses(
             x, mask, beta=0.25
         )
 
@@ -289,14 +359,14 @@ class PHA_FSQ_VAE(L.LightningModule):
         return loss_pha
 
     def validation_step(self, batch, batch_idx):
-        # TODO: Code duplication between training and validation.
         x, mask = batch
-
-        loss_pha, loss_l2, loss_abs, loss_commit, loss_amp, x_hat = self.compute_losses(
+        loss_pha, loss_l2, loss_abs, loss_commit, loss_amp, x_hat, z_hat_mu, z_hat_alpha = self.compute_losses(
             x, mask, beta=self.hparams.model_cfg["commit_beta"]
         )
 
-        # Logging
+        # Track the codebook usage for this batch
+        self._track_codebook(z_hat_mu, z_hat_alpha, mask, prefix="val")
+
         self.log_dict(
             {
                 "val_loss": loss_pha,
@@ -305,22 +375,21 @@ class PHA_FSQ_VAE(L.LightningModule):
                 "val_commit_mu": loss_commit,
                 "val_commit_alpha": loss_amp,
             },
-            prog_bar=True,
-            sync_dist=True,
+            prog_bar=True, sync_dist=True,
         )
 
         if batch_idx == 0:
             self.val_sample = (x.detach(), x_hat.detach(), mask.detach())
 
     def test_step(self, batch, batch_idx):
-        # TODO: Code duplication between training and validation.
         x, mask = batch
-
-        loss_pha, loss_l2, loss_abs, loss_commit, loss_amp, x_hat = self.compute_losses(
+        loss_pha, loss_l2, loss_abs, loss_commit, loss_amp, x_hat, z_hat_mu, z_hat_alpha = self.compute_losses(
             x, mask, beta=0.25
         )
 
-        # Logging
+        # Track the codebook usage for this batch
+        self._track_codebook(z_hat_mu, z_hat_alpha, mask, prefix="test")
+
         self.log_dict(
             {
                 "test_loss": loss_pha,
@@ -329,8 +398,7 @@ class PHA_FSQ_VAE(L.LightningModule):
                 "test_commit_mu": loss_commit,
                 "test_commit_alpha": loss_amp,
             },
-            prog_bar=True,
-            sync_dist=True,
+            prog_bar=True, sync_dist=True,
         )
 
         self.test_step_outputs.append({
@@ -339,30 +407,28 @@ class PHA_FSQ_VAE(L.LightningModule):
             "mask": mask.detach().cpu()
         })
 
-        if batch_idx == 0:
-            self.test_sample = (x.detach(), x_hat.detach(), mask.detach())
-
-    # Log the validation metrics and plots
     def on_validation_epoch_end(self):
         if self.trainer.sanity_checking:
             return
 
-        # Pass the test sample and tell the router to use the "test" prefix
+        # 1. Evaluate Physics
         self._evaluate_and_log(getattr(self, "val_sample", None), prefix="val")
-        self._evaluate_and_log(getattr(self, "jet_reco", None), prefix="val")
-
+        
+        # 2. Log and clear codebook utilization
+        self._log_and_clear_utilization(prefix="val")
 
     def on_test_epoch_end(self):
-            """Runs once at the very end of trainer.test()"""
-            
-            # 3. Concatenate all lists into giant tensors
-            x_all = torch.cat([b["x"] for b in self.test_step_outputs], dim=0)
-            x_hat_all = torch.cat([b["x_hat"] for b in self.test_step_outputs], dim=0)
-            mask_all = torch.cat([b["mask"] for b in self.test_step_outputs], dim=0)
-            
-            # 4. Pass the giant tuple to your router
-            giant_tuple = (x_all, x_hat_all, mask_all)
-            self._evaluate_and_log(giant_tuple, prefix="test")
-            
-            # 5. Clear the memory manually
-            self.test_step_outputs.clear()
+        # 1. Reconstruct giant tensor block
+        x_all = torch.cat([b["x"] for b in self.test_step_outputs], dim=0)
+        x_hat_all = torch.cat([b["x_hat"] for b in self.test_step_outputs], dim=0)
+        mask_all = torch.cat([b["mask"] for b in self.test_step_outputs], dim=0)
+        
+        # 2. Evaluate Physics
+        giant_tuple = (x_all, x_hat_all, mask_all)
+        self._evaluate_and_log(giant_tuple, prefix="test")
+        
+        # 3. Log and clear codebook utilization
+        self._log_and_clear_utilization(prefix="test")
+        
+        # 4. Clear memory
+        self.test_step_outputs.clear()
