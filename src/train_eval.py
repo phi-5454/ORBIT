@@ -86,6 +86,7 @@ class TrainPipeline:
             **config["trainer"],
         )
 
+    @profile
     def run(self, run_validation=True, run_test=False):
 
         mode=self.config["mode"]
