@@ -81,6 +81,7 @@ class TrainPipeline:
 
         # Initialize Trainer
         self.trainer = L.Trainer(
+            profiler="simple",
             logger=self.logger,
             callbacks=[lr_monitor, early_stop_callback, ModelSummary(max_depth=-1)],
             **config["trainer"],
