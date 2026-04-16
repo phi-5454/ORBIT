@@ -192,6 +192,7 @@ class ParquetDataModule(L.LightningDataModule):
         self.selected_features = selected_features or ["L1T_PUPPIPart_Eta", "L1T_PUPPIPart_Phi", "L1T_PUPPIPart_PT"]
         self.window_particles = window_particles
         self.num_workers = num_workers
+        self.prefetch_factor = 4
 
     def train_dataloader(self):
         dataset = ParquetFeatureDataset(self.parquet_dirs_train, self.features, self.selected_features, self.window_particles)
@@ -200,7 +201,8 @@ class ParquetDataModule(L.LightningDataModule):
             batch_size=None, 
             num_workers=self.num_workers, 
             # FIX: Automatically disables persistence when debugging with 0 workers
-            persistent_workers=(self.num_workers > 0) 
+            persistent_workers=(self.num_workers > 0),
+            prefetch_factor=self.prefetch_factor
         )
 
     def val_dataloader(self):
@@ -210,7 +212,8 @@ class ParquetDataModule(L.LightningDataModule):
             batch_size=None, 
             num_workers=self.num_workers, 
             # FIX: Automatically disables persistence when debugging with 0 workers
-            persistent_workers=(self.num_workers > 0)
+            persistent_workers=(self.num_workers > 0),
+            prefetch_factor=self.prefetch_factor
         )
 
     def test_dataloader(self):
@@ -220,5 +223,6 @@ class ParquetDataModule(L.LightningDataModule):
         return DataLoader(
             dataset, 
             batch_size=None, 
-            num_workers=self.num_workers
+            num_workers=self.num_workers,
+            prefetch_factor=self.prefetch_factor
         )
