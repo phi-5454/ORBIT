@@ -11,6 +11,7 @@ dependencies = [
     "hydra-core>=1.3.2",
     "keras>=3.13.2",
     "lightning>=2.6.1",
+    "line-profiler>=5.0.2",
     "matplotlib>=3.10.8",
     "mplhep>=1.1.2",
     "pyarrow>=23.0.1",
