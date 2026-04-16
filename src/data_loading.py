@@ -1,3 +1,4 @@
+from line_profiler import profile
 import lightning as L
 import numpy as np
 import pyarrow.dataset as ds
@@ -92,13 +93,15 @@ class PreprocessTranformer:
 
 
 class ParquetFeatureDataset(IterableDataset):
-    def __init__(self, parquet_dirs, features, max_particles=256, batch_size=32):
+    def __init__(self, parquet_dirs, features, selected_features=None, max_particles=256, batch_size=32):
         # We load the base dataset just to map the files
         self.dataset = ds.dataset(parquet_dirs, format="parquet")
         self.features = features
+        self.selected_features = selected_features or ["L1T_PUPPIPart_Eta", "L1T_PUPPIPart_Phi", "L1T_PUPPIPart_PT"]
         self.max_particles = max_particles
         self.batch_size = batch_size
 
+    @profile
     def __iter__(self):
         # 1. GET WORKER INFO
         worker_info = get_worker_info()
@@ -130,19 +133,31 @@ class ParquetFeatureDataset(IterableDataset):
 
             event_tensors = []
             PUPPI_cutoff = 0.05
+            
+            # Map selected features to their data
+            cols_to_zip = [df[f] for f in self.selected_features]
+            
+            # We always need PuppiW for the mask if available
+            has_puppi = "L1T_PUPPIPart_PuppiW" in df.columns
+            if has_puppi:
+                puppiw_data = df["L1T_PUPPIPart_PuppiW"]
+            else:
+                puppiw_data = [None] * len(df)
 
-            for eta_arr, phi_arr, pt_arr, pid_arr, puppiw_arr in zip(
-                df[self.features[0]], df[self.features[1]], df[self.features[2]], df[self.features[3]], df[self.features[4]] 
-            ):
-                PUPPI_mask = puppiw_arr > PUPPI_cutoff
+            for i, zipped_row in enumerate(zip(*cols_to_zip)):
+                if has_puppi:
+                    puppiw_arr = puppiw_data.iloc[i]
+                    PUPPI_mask = puppiw_arr > PUPPI_cutoff
+                else:
+                    # Fallback if PuppiW is not present
+                    PUPPI_mask = np.ones_like(zipped_row[0], dtype=bool)
 
-                if len(eta_arr) == 0:
+                if len(zipped_row[0]) == 0:
                     continue
 
+                # Stack the selected features for masked particles
                 coords = np.column_stack([
-                    eta_arr[PUPPI_mask], 
-                    phi_arr[PUPPI_mask], 
-                    pt_arr[PUPPI_mask]
+                    f_arr[PUPPI_mask] for f_arr in zipped_row
                 ]).astype(np.float32)
 
                 coords = coords[: self.max_particles]
@@ -159,23 +174,27 @@ class ParquetFeatureDataset(IterableDataset):
             if pad_len > 0:
                 padded_events = F.pad(padded_events, (0, 0, 0, pad_len), value=0.0)
 
-            mask = padded_events[:, :, 2] != 0.0
+            # Mask is True for real particles, False for padding
+            # A particle is real if it has non-zero PT (assuming PT is one of the features)
+            # or more generally if any of its features are non-zero.
+            mask = (padded_events != 0).any(dim=-1)
 
             yield padded_events, mask
 
 
 class ParquetDataModule(L.LightningDataModule):
-    def __init__(self, parquet_dirs_train, parquet_dirs_val, parquet_dirs_test, features=feature_cols, window_particles=256, num_workers=0):
+    def __init__(self, parquet_dirs_train, parquet_dirs_val, parquet_dirs_test, features=feature_cols, selected_features=None, window_particles=256, num_workers=0):
         super().__init__()
         self.parquet_dirs_train = parquet_dirs_train
         self.parquet_dirs_val = parquet_dirs_val
         self.parquet_dirs_test = parquet_dirs_test
         self.features = features
+        self.selected_features = selected_features or ["L1T_PUPPIPart_Eta", "L1T_PUPPIPart_Phi", "L1T_PUPPIPart_PT"]
         self.window_particles = window_particles
         self.num_workers = num_workers
 
     def train_dataloader(self):
-        dataset = ParquetFeatureDataset(self.parquet_dirs_train, self.features, self.window_particles)
+        dataset = ParquetFeatureDataset(self.parquet_dirs_train, self.features, self.selected_features, self.window_particles)
         return DataLoader(
             dataset, 
             batch_size=None, 
@@ -185,7 +204,7 @@ class ParquetDataModule(L.LightningDataModule):
         )
 
     def val_dataloader(self):
-        dataset = ParquetFeatureDataset(self.parquet_dirs_val, self.features, self.window_particles)
+        dataset = ParquetFeatureDataset(self.parquet_dirs_val, self.features, self.selected_features, self.window_particles)
         return DataLoader(
             dataset, 
             batch_size=None, 
@@ -195,7 +214,7 @@ class ParquetDataModule(L.LightningDataModule):
         )
 
     def test_dataloader(self):
-        dataset = ParquetFeatureDataset(self.parquet_dirs_test, self.features, self.window_particles)
+        dataset = ParquetFeatureDataset(self.parquet_dirs_test, self.features, self.selected_features, self.window_particles)
         # Test loaders generally shouldn't use persistent workers anyway, 
         # since they only run once at the very end.
         return DataLoader(

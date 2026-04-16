@@ -1,3 +1,4 @@
+from line_profiler import profile
 import argparse
 import os
 from pathlib import Path
@@ -37,6 +38,7 @@ def make_run_name(base_name=None):
 @hydra.main(
     version_base=None, config_path=str(BASE_DIR / "conf"), config_name="config.yaml"
 )
+@profile
 def main(cfg: DictConfig):
     if(cfg["replot_only"]):
         npz_files = [f"{cfg["replot"]["in_base_dir"]}/{f}" for f in cfg["replot"]["in_files"]]

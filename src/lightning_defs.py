@@ -1,3 +1,4 @@
+from line_profiler import profile
 import os
 import math
 
@@ -148,6 +149,7 @@ class PHA_FSQ_VAE(L.LightningModule):
             self.log(f"{prefix}_metrics/active_codes_combined", float(len(set_comb)), sync_dist=True)
             set_comb.clear()
 
+    @profile
     def forward(self, x, mask):
         # 1. Encode
         x_proj = self.input_proj(x)
@@ -208,6 +210,7 @@ class PHA_FSQ_VAE(L.LightningModule):
             },
         }
 
+    @profile
     def compute_losses(self, x, mask, beta=0.25, phi_idx=1):
             """
             Calculates losses while respecting the periodicity of the phi angle.
