@@ -79,16 +79,12 @@ class PreprocessTranformer:
         """Applies the inverse transform to the PyTorch prediction tensor."""
         # Create a clone to avoid in-place modification issues during backprop
         tensor_inv = tensor.clone()
-        tensor_inv[..., 2] = (
-            torch.exp(tensor[..., 2]) - self.epsilon + 1.8
-        )
+        tensor_inv[..., 2] = torch.exp(tensor[..., 2] + 1.8) - self.epsilon
         tensor_inv[..., 0] = tensor[..., 0] * 3
         # Azimuthal angle, Modulo 2pi
         tensor_inv[..., 1] = (tensor[..., 1] * torch.pi + torch.pi) % (2 * torch.pi) - torch.pi
         
         return tensor_inv
-
-        return tensor
 
 
 
