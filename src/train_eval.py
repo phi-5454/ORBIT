@@ -61,6 +61,8 @@ class TrainPipeline:
             window_particles=config["model"]["window_particles"],
             batch_size=config["model"]["batch_size"],
             num_workers=config["num_dataload_workers"],
+            shuffle_train=config.get("shuffle_train", True),
+            shuffle_seed=config.get("split_random_seed", 42),
         )
 
         self.unique_run_name = unique_run_name

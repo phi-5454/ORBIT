@@ -115,7 +115,16 @@ class PreprocessTranformer:
 
 class ParquetFeatureDataset(IterableDataset):
     @profile
-    def __init__(self, parquet_dirs, features, selected_features=None, max_particles=256, batch_size=32):
+    def __init__(
+        self,
+        parquet_dirs,
+        features,
+        selected_features=None,
+        max_particles=256,
+        batch_size=32,
+        shuffle_row_groups=False,
+        shuffle_seed=42,
+    ):
         # We load the base dataset just to map the files
         self.dataset = ds.dataset(parquet_dirs, format="parquet")
         self.row_groups = []
@@ -126,12 +135,20 @@ class ParquetFeatureDataset(IterableDataset):
         self.selected_features = selected_features or ["L1T_PUPPIPart_Eta", "L1T_PUPPIPart_Phi", "L1T_PUPPIPart_PT"]
         self.max_particles = max_particles
         self.batch_size = batch_size
+        self.shuffle_row_groups = shuffle_row_groups
+        self.shuffle_seed = shuffle_seed
+        self._iteration = 0
 
     @profile
     def __iter__(self):
         # 1. GET WORKER INFO
         worker_info = get_worker_info()
-        row_groups = self.row_groups
+        row_groups = list(self.row_groups)
+        if self.shuffle_row_groups:
+            seed = self.shuffle_seed + self._iteration
+            rng = np.random.default_rng(seed)
+            rng.shuffle(row_groups)
+            self._iteration += 1
 
         # 2. SHARD ROW GROUPS ACROSS WORKERS
         if worker_info is not None:
@@ -211,7 +228,7 @@ class ParquetFeatureDataset(IterableDataset):
 
 class ParquetDataModule(L.LightningDataModule):
     @profile
-    def __init__(self, parquet_dirs_train, parquet_dirs_val, parquet_dirs_test, features=feature_cols, selected_features=None, window_particles=256, batch_size=32, num_workers=0):
+    def __init__(self, parquet_dirs_train, parquet_dirs_val, parquet_dirs_test, features=feature_cols, selected_features=None, window_particles=256, batch_size=32, num_workers=0, shuffle_train=True, shuffle_seed=42):
         super().__init__()
         self.parquet_dirs_train = parquet_dirs_train
         self.parquet_dirs_val = parquet_dirs_val
@@ -221,6 +238,8 @@ class ParquetDataModule(L.LightningDataModule):
         self.window_particles = window_particles
         self.batch_size = batch_size
         self.num_workers = num_workers
+        self.shuffle_train = shuffle_train
+        self.shuffle_seed = shuffle_seed
 
     @profile
     def _make_loader(self, dataset, persistent_workers=True):
@@ -236,17 +255,41 @@ class ParquetDataModule(L.LightningDataModule):
 
     @profile
     def train_dataloader(self):
-        dataset = ParquetFeatureDataset(self.parquet_dirs_train, self.features, self.selected_features, self.window_particles, self.batch_size)
+        dataset = ParquetFeatureDataset(
+            self.parquet_dirs_train,
+            self.features,
+            self.selected_features,
+            self.window_particles,
+            self.batch_size,
+            shuffle_row_groups=self.shuffle_train,
+            shuffle_seed=self.shuffle_seed,
+        )
         return self._make_loader(dataset)
 
     @profile
     def val_dataloader(self):
-        dataset = ParquetFeatureDataset(self.parquet_dirs_val, self.features, self.selected_features, self.window_particles, self.batch_size)
+        dataset = ParquetFeatureDataset(
+            self.parquet_dirs_val,
+            self.features,
+            self.selected_features,
+            self.window_particles,
+            self.batch_size,
+            shuffle_row_groups=False,
+            shuffle_seed=self.shuffle_seed,
+        )
         return self._make_loader(dataset)
 
     @profile
     def test_dataloader(self):
-        dataset = ParquetFeatureDataset(self.parquet_dirs_test, self.features, self.selected_features, self.window_particles, self.batch_size)
+        dataset = ParquetFeatureDataset(
+            self.parquet_dirs_test,
+            self.features,
+            self.selected_features,
+            self.window_particles,
+            self.batch_size,
+            shuffle_row_groups=False,
+            shuffle_seed=self.shuffle_seed,
+        )
         # Test loaders generally shouldn't use persistent workers anyway, 
         # since they only run once at the very end.
         return self._make_loader(dataset, persistent_workers=False)
