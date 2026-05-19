@@ -98,6 +98,7 @@ class PHA_FSQ_VAE(L.LightningModule):
 
         self.evaluator = PhysicsEvaluator()
 
+    @profile
     def _track_codebook(self, z_hat_mu, z_hat_alpha, mask, prefix="val"):
         """Extracts unique codes from the current batch and adds them to the global epoch sets."""
         z_mu_valid = z_hat_mu[mask]
@@ -128,6 +129,7 @@ class PHA_FSQ_VAE(L.LightningModule):
             for vec in np.round(uniq_combined, decimals=4):
                 set_comb.add(tuple(vec))
 
+    @profile
     def _log_and_clear_utilization(self, prefix="val"):
         """Calculates utilization percentages, logs them, and safely clears the sets."""
         if prefix == "val":
@@ -185,6 +187,7 @@ class PHA_FSQ_VAE(L.LightningModule):
 
         return x_hat, z_mu, z_hat_mu, z_alpha, z_hat_alpha
 
+    @profile
     def forward_with_diagnostics(self, x, mask):
         x_proj = self.input_proj(x)
         z_encoded, encoder_diags = self.encoder(
@@ -223,6 +226,7 @@ class PHA_FSQ_VAE(L.LightningModule):
         indices = mask.float().argmax(dim=1)
         return indices, has_valid
 
+    @profile
     def _attention_diagnostic_stats(self, diagnostics, mask, prefix):
         stats = {}
         figures = {}
@@ -286,6 +290,7 @@ class PHA_FSQ_VAE(L.LightningModule):
 
         return stats, figures
 
+    @profile
     def _build_context_probes(self, x, mask):
         target_idx, has_valid = self._first_valid_indices(mask)
         batch_idx = torch.arange(x.shape[0], device=x.device)
@@ -302,6 +307,7 @@ class PHA_FSQ_VAE(L.LightningModule):
 
         return target_idx, has_valid, self_only_x, self_only_mask, swapped_x, swapped_mask
 
+    @profile
     def _collect_correlation_diagnostics(self, x, mask):
         max_events = int(self.model_cfg.get("diagnostic_max_events", 8))
         x = x[:max_events]
@@ -351,6 +357,7 @@ class PHA_FSQ_VAE(L.LightningModule):
 
         return stats, figures
 
+    @profile
     def _log_correlation_diagnostics(self):
         diagnostics = self.val_correlation_diagnostics
         self.val_correlation_diagnostics = None
@@ -382,6 +389,7 @@ class PHA_FSQ_VAE(L.LightningModule):
         for fig in figures.values():
             plt.close(fig)
 
+    @profile
     def configure_optimizers(self):
         # Tip: AdamW (with weight decay) is vastly superior to Adam for Transformers
         optimizer = torch.optim.AdamW(
@@ -447,6 +455,7 @@ class PHA_FSQ_VAE(L.LightningModule):
 
 
 
+    @profile
     def _evaluate_and_log(self, sample_tuple, prefix="val"):
         """Handles evaluator routing for both validation and testing."""
         if sample_tuple is None:
@@ -525,6 +534,7 @@ class PHA_FSQ_VAE(L.LightningModule):
 
     '''
 
+    @profile
     def training_step(self, batch, batch_idx):
         # WELD: Unpack the yielded tuple
         x, mask = batch
@@ -559,6 +569,7 @@ class PHA_FSQ_VAE(L.LightningModule):
 
         return loss_pha
 
+    @profile
     def validation_step(self, batch, batch_idx):
         x, mask = batch
         loss_pha, loss_l2, loss_abs, loss_commit, loss_amp, x_hat, z_hat_mu, z_hat_alpha = self.compute_losses(
@@ -584,6 +595,7 @@ class PHA_FSQ_VAE(L.LightningModule):
             if not self.trainer.sanity_checking and self.val_correlation_diagnostics is None:
                 self.val_correlation_diagnostics = self._collect_correlation_diagnostics(x.detach(), mask.detach())
 
+    @profile
     def test_step(self, batch, batch_idx):
         x, mask = batch
         loss_pha, loss_l2, loss_abs, loss_commit, loss_amp, x_hat, z_hat_mu, z_hat_alpha = self.compute_losses(
@@ -610,6 +622,7 @@ class PHA_FSQ_VAE(L.LightningModule):
             "mask": mask.detach().cpu()
         })
 
+    @profile
     def on_validation_epoch_end(self):
         if self.trainer.sanity_checking:
             return
@@ -623,6 +636,7 @@ class PHA_FSQ_VAE(L.LightningModule):
         # 3. Log particle-correlation diagnostics
         self._log_correlation_diagnostics()
 
+    @profile
     def on_test_epoch_end(self):
         # 1. Reconstruct giant tensor block
         x_all = torch.cat([b["x"] for b in self.test_step_outputs], dim=0)

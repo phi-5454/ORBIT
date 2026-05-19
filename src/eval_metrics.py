@@ -8,12 +8,15 @@ import numpy as np
 import mplhep as mh
 import logging
 
+from line_profiler import profile
+
 from data_loading import PreprocessTranformer
 
 class PhysicsEvaluator:
     def __init__(self, feature_names=["Eta", "Phi", "pT"]):
         self.feature_names = feature_names
 
+    @profile
     def evaluate_reconstruction(self, x, x_hat, mask):
         results = {}
 
@@ -263,12 +266,14 @@ class PhysicsEvaluator:
 # Ensure vector behaviors are registered
 vector.register_awkward()
 
+@profile
 def calc_deltaR(particles, jet):
     """Helper to calculate DeltaR between particles and a specific jet."""
     jet = ak.unflatten(ak.flatten(jet), counts=1)
     return particles.deltaR(jet)
 
 class EventJetReconstructor:
+    @profile
     def __init__(
         self, 
         R=0.8, 
@@ -300,6 +305,7 @@ class EventJetReconstructor:
         else:
             self.jetdef = fastjet.JetDefinition(fastjet.kt_algorithm, self.R)
 
+    @profile
     def __call__(self, pt, eta, phi, particle_mask=None):
         """
         Clusters a single event's particles into inclusive jets AND calculates 
@@ -418,6 +424,7 @@ class EventJetReconstructor:
             "d2": float(d2[0]) if len(d2) > 0 else 0.0,
         }
 
+    @profile
     def _empty_result(self):
         """Returns safe default values for empty or rejected events."""
         return {

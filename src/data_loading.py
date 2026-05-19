@@ -32,6 +32,7 @@ class UniformQuantizerSTE(nn.Module):
             self.q_min = 0
             self.q_max = (2 ** self.bit_depth) - 1
 
+    @profile
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # 1. Scale to the integer domain
         x_scaled = x / self.lsb
@@ -61,6 +62,7 @@ class PreprocessTranformer:
         # ..truncate an quantize the given features
         pass
 
+    @profile
     def forward_dataframe(self, df):
 
 
@@ -76,6 +78,7 @@ class PreprocessTranformer:
 
         return df
 
+    @profile
     def inverse_tensor(self, tensor):
         """Applies the inverse transform to the PyTorch prediction tensor."""
         # Create a clone to avoid in-place modification issues during backprop
@@ -90,6 +93,7 @@ class PreprocessTranformer:
 
 
 class ParquetFeatureDataset(IterableDataset):
+    @profile
     def __init__(self, parquet_dirs, features, selected_features=None, max_particles=256, batch_size=32):
         # We load the base dataset just to map the files
         self.dataset = ds.dataset(parquet_dirs, format="parquet")
@@ -197,6 +201,7 @@ class ParquetFeatureDataset(IterableDataset):
 
 
 class ParquetDataModule(L.LightningDataModule):
+    @profile
     def __init__(self, parquet_dirs_train, parquet_dirs_val, parquet_dirs_test, features=feature_cols, selected_features=None, window_particles=256, batch_size=32, num_workers=0):
         super().__init__()
         self.parquet_dirs_train = parquet_dirs_train
@@ -208,6 +213,7 @@ class ParquetDataModule(L.LightningDataModule):
         self.batch_size = batch_size
         self.num_workers = num_workers
 
+    @profile
     def _make_loader(self, dataset, persistent_workers=True):
         kwargs = {
             "batch_size": None,
@@ -219,14 +225,17 @@ class ParquetDataModule(L.LightningDataModule):
             kwargs["prefetch_factor"] = 4
         return DataLoader(dataset, **kwargs)
 
+    @profile
     def train_dataloader(self):
         dataset = ParquetFeatureDataset(self.parquet_dirs_train, self.features, self.selected_features, self.window_particles, self.batch_size)
         return self._make_loader(dataset)
 
+    @profile
     def val_dataloader(self):
         dataset = ParquetFeatureDataset(self.parquet_dirs_val, self.features, self.selected_features, self.window_particles, self.batch_size)
         return self._make_loader(dataset)
 
+    @profile
     def test_dataloader(self):
         dataset = ParquetFeatureDataset(self.parquet_dirs_test, self.features, self.selected_features, self.window_particles, self.batch_size)
         # Test loaders generally shouldn't use persistent workers anyway, 

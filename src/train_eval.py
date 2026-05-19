@@ -1,6 +1,7 @@
 from datetime import datetime
 import os
 
+from line_profiler import profile
 import fastjet
 import lightning as L
 import matplotlib.pyplot as plt
@@ -35,6 +36,7 @@ def make_run_name(base_name=None):
 
 class TrainPipeline:
     # TODO: handle all the params
+    @profile
     def __init__(self, config, unique_run_name, train_val_files=[], test_files=[]) -> None:
         self.config = config
         train_val_split = np.array(self.config["train_val_split"])
@@ -95,6 +97,7 @@ class TrainPipeline:
             profiler="simple"
         )
 
+    @profile
     def run(self, run_validation=True, run_test=False):
 
         mode=self.config["mode"]
