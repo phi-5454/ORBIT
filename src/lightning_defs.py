@@ -548,7 +548,6 @@ class PHA_FSQ_VAE(L.LightningModule):
         # TODO: Make the increment only for the first epoch
         self.total_train_events_seen += x.shape[0]
 
-        # Logging
         self.log_dict(
             {
                 "train_loss": loss_pha,
@@ -558,13 +557,15 @@ class PHA_FSQ_VAE(L.LightningModule):
                 "commit_alpha": loss_amp,
             },
             prog_bar=True,
+            on_step=True,
+            on_epoch=False,
         )
         self.log(
-            "global/events_seen", 
-            float(self.total_train_events_seen), 
-            on_step=True, 
-            on_epoch=False, 
-            prog_bar=False  # Keeps your terminal progress bar clean
+            "global/events_seen",
+            float(self.total_train_events_seen),
+            on_step=True,
+            on_epoch=False,
+            prog_bar=False,
         )
 
         return loss_pha
