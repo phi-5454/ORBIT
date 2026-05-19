@@ -48,10 +48,18 @@ class TrainPipeline:
         indices = np.random.permutation(num_train_val)
         train_val_files = np.array(train_val_files)[indices]
 
-        train_files = train_val_files[:max(num_train,1)]
-        val_files = train_val_files[min(num_train, num_train_val - 1):]
+        train_files = [os.path.expanduser(path) for path in train_val_files[:max(num_train,1)]]
+        val_files = [os.path.expanduser(path) for path in train_val_files[min(num_train, num_train_val - 1):]]
+        test_files = [os.path.expanduser(path) for path in test_files] if test_files else test_files
 
-        self.datamodule = ParquetDataModule(train_files.tolist(), val_files.tolist(), test_files, window_particles=config["model"]["window_particles"], num_workers=config["num_dataload_workers"])
+        self.datamodule = ParquetDataModule(
+            train_files,
+            val_files,
+            test_files,
+            window_particles=config["model"]["window_particles"],
+            batch_size=config["model"]["batch_size"],
+            num_workers=config["num_dataload_workers"],
+        )
 
         self.unique_run_name = unique_run_name
 

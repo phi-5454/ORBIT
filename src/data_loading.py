@@ -2,6 +2,7 @@ from line_profiler import profile
 import lightning as L
 import numpy as np
 import pyarrow.dataset as ds
+import pyarrow.parquet as pq
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -103,83 +104,100 @@ class ParquetFeatureDataset(IterableDataset):
         worker_info = get_worker_info()
         files = self.dataset.files
 
-        # 2. SHARD THE FILES ACROSS WORKERS
+        row_groups = []
+        for file_path in files:
+            parquet_file = pq.ParquetFile(file_path)
+            row_groups.extend((file_path, row_group_idx) for row_group_idx in range(parquet_file.num_row_groups))
+
+        # 2. SHARD ROW GROUPS ACROSS WORKERS
         if worker_info is not None:
             worker_id = worker_info.id
             num_workers = worker_info.num_workers
             
-            # Slice the file list: start at worker_id, step by num_workers
-            files = files[worker_id::num_workers]
+            # Slice row groups, not files. A cluster job often trains from one
+            # large parquet file, where file-level sharding leaves workers idle.
+            row_groups = row_groups[worker_id::num_workers]
             
-            # Edge case: If there are more workers than files, some workers get nothing
-            if not files:
+            # Edge case: If there are more workers than row groups, some workers get nothing
+            if not row_groups:
                 return
 
-        # 3. CREATE A WORKER-SPECIFIC DATASET
-        worker_dataset = ds.dataset(files, format="parquet")
+        transformer = PreprocessTranformer()
 
-        # Read only the required physical features for this specific worker
-        batches = worker_dataset.to_batches(
-            columns=self.features, batch_size=self.batch_size
-        )
-
-        for batch in batches:
-            df = batch.to_pandas()
-            df = PreprocessTranformer().forward_dataframe(df)
-
-            event_tensors = []
-            PUPPI_cutoff = 0.05
-            
-            # Map selected features to their data
-            cols_to_zip = [df[f] for f in self.selected_features]
-            
-            # We always need PuppiW for the mask if available
-            has_puppi = "L1T_PUPPIPart_PuppiW" in df.columns
-            if has_puppi:
-                puppiw_data = df["L1T_PUPPIPart_PuppiW"]
-            else:
-                puppiw_data = [None] * len(df)
-
-            for i, zipped_row in enumerate(zip(*cols_to_zip)):
-                if has_puppi:
-                    puppiw_arr = puppiw_data.iloc[i]
-                    PUPPI_mask = puppiw_arr > PUPPI_cutoff
-                else:
-                    # Fallback if PuppiW is not present
-                    PUPPI_mask = np.ones_like(zipped_row[0], dtype=bool)
-
-                if len(zipped_row[0]) == 0:
-                    continue
-
-                # Stack the selected features for masked particles
-                coords = np.column_stack([
-                    f_arr[PUPPI_mask] for f_arr in zipped_row
-                ]).astype(np.float32)
-
-                coords = coords[: self.max_particles]
-                event_tensors.append(torch.tensor(coords))
-
-            if not event_tensors:
-                continue
-
-            padded_events = pad_sequence(
-                event_tensors, batch_first=True, padding_value=0.0
+        # 3. READ WORKER-SPECIFIC ROW GROUPS
+        for file_path, row_group_idx in row_groups:
+            parquet_file = pq.ParquetFile(file_path)
+            batches = parquet_file.iter_batches(
+                row_groups=[row_group_idx],
+                columns=self.features,
+                batch_size=self.batch_size,
+                use_threads=True,
             )
 
-            pad_len = self.max_particles - padded_events.shape[1]
-            if pad_len > 0:
-                padded_events = F.pad(padded_events, (0, 0, 0, pad_len), value=0.0)
+            for batch in batches:
+                df = batch.to_pandas()
+                df = transformer.forward_dataframe(df)
 
-            # Mask is True for real particles, False for padding
-            # A particle is real if it has non-zero PT (assuming PT is one of the features)
-            # or more generally if any of its features are non-zero.
-            mask = (padded_events != 0).any(dim=-1)
+                event_tensors = []
+                PUPPI_cutoff = 0.05
+                
+                # Map selected features to their data
+                cols_to_zip = [df[f] for f in self.selected_features]
+                
+                # We always need PuppiW for the mask if available
+                has_puppi = "L1T_PUPPIPart_PuppiW" in df.columns
+                if has_puppi:
+                    puppiw_data = df["L1T_PUPPIPart_PuppiW"]
+                else:
+                    puppiw_data = [None] * len(df)
 
-            yield padded_events, mask
+                for i, zipped_row in enumerate(zip(*cols_to_zip)):
+                    if len(zipped_row[0]) == 0:
+                        continue
+
+                    if has_puppi:
+                        puppiw_arr = puppiw_data.iloc[i]
+                        PUPPI_mask = puppiw_arr > PUPPI_cutoff
+                    else:
+                        # Fallback if PuppiW is not present
+                        PUPPI_mask = np.ones_like(zipped_row[0], dtype=bool)
+
+                    # Stack the selected features for masked particles
+                    coords = np.column_stack([
+                        f_arr[PUPPI_mask] for f_arr in zipped_row
+                    ]).astype(np.float32)
+
+                    coords = coords[: self.max_particles]
+                    if len(coords) == 0:
+                        continue
+
+                    event_tensors.append(torch.tensor(coords))
+
+                if not event_tensors:
+                    continue
+
+                padded_events = pad_sequence(
+                    event_tensors, batch_first=True, padding_value=0.0
+                )
+
+                pad_len = self.max_particles - padded_events.shape[1]
+                if pad_len > 0:
+                    padded_events = F.pad(padded_events, (0, 0, 0, pad_len), value=0.0)
+
+                # Mask is True for real particles, False for padding. Build it
+                # from event lengths instead of feature values so legitimate
+                # all-zero transformed particles are not treated as padding.
+                lengths = torch.tensor(
+                    [event.shape[0] for event in event_tensors],
+                    dtype=torch.long,
+                )
+                mask = torch.arange(self.max_particles).unsqueeze(0) < lengths.unsqueeze(1)
+
+                yield padded_events, mask
 
 
 class ParquetDataModule(L.LightningDataModule):
-    def __init__(self, parquet_dirs_train, parquet_dirs_val, parquet_dirs_test, features=feature_cols, selected_features=None, window_particles=256, num_workers=0):
+    def __init__(self, parquet_dirs_train, parquet_dirs_val, parquet_dirs_test, features=feature_cols, selected_features=None, window_particles=256, batch_size=32, num_workers=0):
         super().__init__()
         self.parquet_dirs_train = parquet_dirs_train
         self.parquet_dirs_val = parquet_dirs_val
@@ -187,34 +205,30 @@ class ParquetDataModule(L.LightningDataModule):
         self.features = features
         self.selected_features = selected_features or ["L1T_PUPPIPart_Eta", "L1T_PUPPIPart_Phi", "L1T_PUPPIPart_PT"]
         self.window_particles = window_particles
+        self.batch_size = batch_size
         self.num_workers = num_workers
 
+    def _make_loader(self, dataset, persistent_workers=True):
+        kwargs = {
+            "batch_size": None,
+            "num_workers": self.num_workers,
+            "pin_memory": torch.cuda.is_available(),
+            "persistent_workers": persistent_workers and self.num_workers > 0,
+        }
+        if self.num_workers > 0:
+            kwargs["prefetch_factor"] = 4
+        return DataLoader(dataset, **kwargs)
+
     def train_dataloader(self):
-        dataset = ParquetFeatureDataset(self.parquet_dirs_train, self.features, self.selected_features, self.window_particles)
-        return DataLoader(
-            dataset, 
-            batch_size=None, 
-            num_workers=self.num_workers, 
-            # FIX: Automatically disables persistence when debugging with 0 workers
-            persistent_workers=(self.num_workers > 0) 
-        )
+        dataset = ParquetFeatureDataset(self.parquet_dirs_train, self.features, self.selected_features, self.window_particles, self.batch_size)
+        return self._make_loader(dataset)
 
     def val_dataloader(self):
-        dataset = ParquetFeatureDataset(self.parquet_dirs_val, self.features, self.selected_features, self.window_particles)
-        return DataLoader(
-            dataset, 
-            batch_size=None, 
-            num_workers=self.num_workers, 
-            # FIX: Automatically disables persistence when debugging with 0 workers
-            persistent_workers=(self.num_workers > 0)
-        )
+        dataset = ParquetFeatureDataset(self.parquet_dirs_val, self.features, self.selected_features, self.window_particles, self.batch_size)
+        return self._make_loader(dataset)
 
     def test_dataloader(self):
-        dataset = ParquetFeatureDataset(self.parquet_dirs_test, self.features, self.selected_features, self.window_particles)
+        dataset = ParquetFeatureDataset(self.parquet_dirs_test, self.features, self.selected_features, self.window_particles, self.batch_size)
         # Test loaders generally shouldn't use persistent workers anyway, 
         # since they only run once at the very end.
-        return DataLoader(
-            dataset, 
-            batch_size=None, 
-            num_workers=self.num_workers
-        )
+        return self._make_loader(dataset, persistent_workers=False)

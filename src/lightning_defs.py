@@ -23,6 +23,7 @@ class PHA_FSQ_VAE(L.LightningModule):
 
         self.total_train_events_seen = 0
         self.test_step_outputs = []
+        self.val_correlation_diagnostics = None
 
         self.dim_mu = len(model_cfg["fsq_mu_levels"])
         self.dim_alpha = len(model_cfg["fsq_alpha_levels"])
@@ -183,6 +184,203 @@ class PHA_FSQ_VAE(L.LightningModule):
         x_hat = self.output_proj(x_hat_lat)
 
         return x_hat, z_mu, z_hat_mu, z_alpha, z_hat_alpha
+
+    def forward_with_diagnostics(self, x, mask):
+        x_proj = self.input_proj(x)
+        z_encoded, encoder_diags = self.encoder(
+            x_proj,
+            mask,
+            use_attention=self.model_cfg["use_attention"],
+            return_diagnostics=True,
+        )
+
+        z_mu, z_alpha = self.phi(z_encoded)
+        z_hat_mu = self.quantizer_mu(z_mu)
+        z_hat_alpha = self.quantizer_alpha(z_alpha)
+
+        if self.model_cfg["skip_quantization"] == True:
+            z_decoded = self.psi(z_mu, z_alpha)
+        else:
+            z_ste_mu = z_mu + (z_hat_mu - z_mu).detach()
+            z_ste_alpha = z_alpha + (z_hat_alpha - z_alpha).detach()
+            z_decoded = self.psi(z_ste_mu, z_ste_alpha)
+
+        x_hat_lat, decoder_diags = self.decoder(
+            z_decoded,
+            mask,
+            self.model_cfg["use_attention"],
+            return_diagnostics=True,
+        )
+        x_hat = self.output_proj(x_hat_lat)
+
+        return x_hat, z_mu, z_hat_mu, z_alpha, z_hat_alpha, {
+            "encoder": encoder_diags,
+            "decoder": decoder_diags,
+        }
+
+    def _first_valid_indices(self, mask):
+        has_valid = mask.any(dim=1)
+        indices = mask.float().argmax(dim=1)
+        return indices, has_valid
+
+    def _attention_diagnostic_stats(self, diagnostics, mask, prefix):
+        stats = {}
+        figures = {}
+        valid = mask.bool()
+
+        for layer in diagnostics:
+            if "attn_weights" not in layer:
+                continue
+
+            layer_idx = layer["layer_idx"]
+            weights = layer["attn_weights"].detach()
+            # Shape: [batch, heads, query_particles, key_particles]
+            query_mask = valid[:, None, :, None]
+            key_mask = valid[:, None, None, :]
+            pair_mask = query_mask & key_mask
+            denom = pair_mask.sum().clamp(min=1)
+
+            masked_weights = weights.masked_fill(~pair_mask, 0.0)
+            diag = torch.diagonal(masked_weights, dim1=-2, dim2=-1)
+            diag_mask = valid[:, None, :]
+            diag_mass = diag[diag_mask.expand_as(diag)].mean()
+
+            row_sums = masked_weights.sum(dim=-1).clamp(min=1e-12)
+            probs = masked_weights / row_sums.unsqueeze(-1)
+            entropy = -(probs.clamp(min=1e-12) * probs.clamp(min=1e-12).log()).sum(dim=-1)
+            n_keys = valid.sum(dim=1).clamp(min=2).float()
+            normalized_entropy = entropy / n_keys.log()[:, None, None]
+            query_values = normalized_entropy[valid[:, None, :].expand_as(normalized_entropy)]
+
+            max_mass = probs.max(dim=-1).values
+            max_values = max_mass[valid[:, None, :].expand_as(max_mass)]
+
+            attn_delta = layer.get("attn_delta")
+            ff_delta = layer.get("ff_delta")
+            if attn_delta is not None and ff_delta is not None:
+                token_mask = valid[:, :, None]
+                attn_norm = attn_delta.detach()[token_mask.expand_as(attn_delta)].norm()
+                ff_norm = ff_delta.detach()[token_mask.expand_as(ff_delta)].norm()
+                stats[f"{prefix}/layer_{layer_idx}_attn_to_ff_delta_norm"] = (
+                    attn_norm / ff_norm.clamp(min=1e-12)
+                ).detach().cpu()
+
+            stats[f"{prefix}/layer_{layer_idx}_diag_attention_mass"] = diag_mass.detach().cpu()
+            stats[f"{prefix}/layer_{layer_idx}_offdiag_attention_mass"] = (1.0 - diag_mass).detach().cpu()
+            stats[f"{prefix}/layer_{layer_idx}_max_attention_mass"] = max_values.mean().detach().cpu()
+            stats[f"{prefix}/layer_{layer_idx}_normalized_attention_entropy"] = query_values.mean().detach().cpu()
+            stats[f"{prefix}/layer_{layer_idx}_valid_pair_count"] = denom.detach().float().cpu()
+
+            if layer_idx in (0, len(diagnostics) - 1):
+                first_event = int(valid.any(dim=1).nonzero(as_tuple=False)[0].item()) if valid.any() else 0
+                n_valid = int(valid[first_event].sum().item())
+                if n_valid > 1:
+                    matrix = weights[first_event, :, :n_valid, :n_valid].mean(dim=0).detach().cpu().numpy()
+                    fig, ax = plt.subplots(figsize=(5, 4))
+                    im = ax.imshow(matrix, vmin=0.0, vmax=max(float(matrix.max()), 1e-6), aspect="auto")
+                    ax.set_title(f"{prefix} layer {layer_idx} attention")
+                    ax.set_xlabel("key particle")
+                    ax.set_ylabel("query particle")
+                    fig.colorbar(im, ax=ax)
+                    figures[f"{prefix}/layer_{layer_idx}_attention_map"] = fig
+
+        return stats, figures
+
+    def _build_context_probes(self, x, mask):
+        target_idx, has_valid = self._first_valid_indices(mask)
+        batch_idx = torch.arange(x.shape[0], device=x.device)
+
+        self_only_x = torch.zeros_like(x)
+        self_only_mask = torch.zeros_like(mask)
+        self_only_x[batch_idx, target_idx] = x[batch_idx, target_idx]
+        self_only_mask[batch_idx, target_idx] = has_valid
+
+        swapped_x = torch.roll(x, shifts=1, dims=0)
+        swapped_mask = torch.roll(mask, shifts=1, dims=0)
+        swapped_x[batch_idx, target_idx] = x[batch_idx, target_idx]
+        swapped_mask[batch_idx, target_idx] = has_valid
+
+        return target_idx, has_valid, self_only_x, self_only_mask, swapped_x, swapped_mask
+
+    def _collect_correlation_diagnostics(self, x, mask):
+        max_events = int(self.model_cfg.get("diagnostic_max_events", 8))
+        x = x[:max_events]
+        mask = mask[:max_events]
+
+        with torch.no_grad():
+            x_hat, _, _, _, _, diagnostics = self.forward_with_diagnostics(x, mask)
+
+            target_idx, has_valid, self_only_x, self_only_mask, swapped_x, swapped_mask = self._build_context_probes(x, mask)
+            batch_idx = torch.arange(x.shape[0], device=x.device)
+
+            self_only_x_hat = self(self_only_x, self_only_mask)[0]
+            swapped_x_hat = self(swapped_x, swapped_mask)[0]
+
+            target_orig = x_hat[batch_idx, target_idx][has_valid]
+            target_self_only = self_only_x_hat[batch_idx, target_idx][has_valid]
+            target_swapped = swapped_x_hat[batch_idx, target_idx][has_valid]
+
+            stats = {
+                "context/self_only_target_l1": F.l1_loss(target_orig, target_self_only).detach().cpu(),
+                "context/self_only_target_l2": F.mse_loss(target_orig, target_self_only).detach().cpu(),
+                "context/swapped_context_target_l1": F.l1_loss(target_orig, target_swapped).detach().cpu(),
+                "context/swapped_context_target_l2": F.mse_loss(target_orig, target_swapped).detach().cpu(),
+            }
+
+            perm = torch.stack([torch.randperm(x.shape[1], device=x.device) for _ in range(x.shape[0])])
+            inv_perm = torch.argsort(perm, dim=1)
+            gather_idx = perm[:, :, None].expand(-1, -1, x.shape[-1])
+            x_perm = torch.gather(x, 1, gather_idx)
+            mask_perm = torch.gather(mask, 1, perm)
+            x_hat_perm = self(x_perm, mask_perm)[0]
+            x_hat_unpermuted = torch.gather(x_hat_perm, 1, inv_perm[:, :, None].expand(-1, -1, x.shape[-1]))
+            stats["context/permutation_equivariance_l1"] = F.l1_loss(
+                x_hat[mask],
+                x_hat_unpermuted[mask],
+            ).detach().cpu()
+
+            figures = {}
+            for block_name in ("encoder", "decoder"):
+                block_stats, block_figures = self._attention_diagnostic_stats(
+                    diagnostics[block_name],
+                    mask,
+                    f"attention/{block_name}",
+                )
+                stats.update(block_stats)
+                figures.update(block_figures)
+
+        return stats, figures
+
+    def _log_correlation_diagnostics(self):
+        diagnostics = self.val_correlation_diagnostics
+        self.val_correlation_diagnostics = None
+        if diagnostics is None:
+            return
+
+        stats, figures = diagnostics
+        for key, value in stats.items():
+            if torch.is_tensor(value):
+                value = value.to(self.device)
+            self.log(f"val_diagnostics/{key}", value, sync_dist=True)
+
+        if not self.trainer.is_global_zero:
+            for fig in figures.values():
+                plt.close(fig)
+            return
+
+        if isinstance(self.logger, L.pytorch.loggers.WandbLogger):
+            payload = {f"val_diagnostics/{key}": wandb.Image(fig) for key, fig in figures.items()}
+            if payload:
+                self.logger.experiment.log(payload, step=self.global_step)
+        else:
+            save_dir = os.path.join(self.output_dir, "local_debug_plots")
+            os.makedirs(save_dir, exist_ok=True)
+            for key, fig in figures.items():
+                clean_key = key.replace("/", "_")
+                fig.savefig(os.path.join(save_dir, f"val_diagnostics_{clean_key}_step_{self.global_step}.png"))
+
+        for fig in figures.values():
+            plt.close(fig)
 
     def configure_optimizers(self):
         # Tip: AdamW (with weight decay) is vastly superior to Adam for Transformers
@@ -383,6 +581,8 @@ class PHA_FSQ_VAE(L.LightningModule):
 
         if batch_idx == 0:
             self.val_sample = (x.detach(), x_hat.detach(), mask.detach())
+            if not self.trainer.sanity_checking and self.val_correlation_diagnostics is None:
+                self.val_correlation_diagnostics = self._collect_correlation_diagnostics(x.detach(), mask.detach())
 
     def test_step(self, batch, batch_idx):
         x, mask = batch
@@ -419,6 +619,9 @@ class PHA_FSQ_VAE(L.LightningModule):
         
         # 2. Log and clear codebook utilization
         self._log_and_clear_utilization(prefix="val")
+
+        # 3. Log particle-correlation diagnostics
+        self._log_correlation_diagnostics()
 
     def on_test_epoch_end(self):
         # 1. Reconstruct giant tensor block

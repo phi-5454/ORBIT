@@ -23,5 +23,6 @@ weight_decay: 1e-3
 commit_beta: 0.25
 skip_quantization: True
 use_attention: True
+diagnostic_max_events: 8
 # TODO: early stopping
 # TODO: Gradient clipping
