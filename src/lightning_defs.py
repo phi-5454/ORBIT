@@ -226,8 +226,47 @@ class PHA_FSQ_VAE(L.LightningModule):
         indices = mask.float().argmax(dim=1)
         return indices, has_valid
 
+    def _attention_delta_eta_phi_figure(self, weights, x, valid, title):
+        # Inputs are normalized as eta / 3 and phi / pi in the dataloader.
+        attn = weights.mean(dim=1)
+        eta = x[..., 0] * 3.0
+        phi = x[..., 1] * math.pi
+
+        deta = eta[:, :, None] - eta[:, None, :]
+        dphi = phi[:, :, None] - phi[:, None, :]
+        dphi = torch.remainder(dphi + math.pi, 2 * math.pi) - math.pi
+
+        pair_mask = valid[:, :, None] & valid[:, None, :]
+        if not pair_mask.any():
+            return None
+
+        deta_np = deta[pair_mask].detach().cpu().numpy()
+        dphi_np = dphi[pair_mask].detach().cpu().numpy()
+        weight_np = attn[pair_mask].detach().cpu().numpy()
+
+        hist, eta_edges, phi_edges = np.histogram2d(
+            deta_np,
+            dphi_np,
+            bins=(60, 64),
+            range=((-6.0, 6.0), (-math.pi, math.pi)),
+            weights=weight_np,
+        )
+
+        fig, ax = plt.subplots(figsize=(6, 5))
+        im = ax.imshow(
+            hist.T,
+            origin="lower",
+            extent=[eta_edges[0], eta_edges[-1], phi_edges[0], phi_edges[-1]],
+            aspect="auto",
+        )
+        ax.set_title(title)
+        ax.set_xlabel(r"$\Delta\eta = \eta_\mathrm{query} - \eta_\mathrm{key}$")
+        ax.set_ylabel(r"$\Delta\phi = \phi_\mathrm{query} - \phi_\mathrm{key}$")
+        fig.colorbar(im, ax=ax, label="attention weight sum")
+        return fig
+
     @profile
-    def _attention_diagnostic_stats(self, diagnostics, mask, prefix):
+    def _attention_diagnostic_stats(self, diagnostics, mask, prefix, x=None):
         stats = {}
         figures = {}
         valid = mask.bool()
@@ -287,6 +326,16 @@ class PHA_FSQ_VAE(L.LightningModule):
                     ax.set_ylabel("query particle")
                     fig.colorbar(im, ax=ax)
                     figures[f"{prefix}/layer_{layer_idx}_attention_map"] = fig
+
+                    if x is not None and x.shape[-1] >= 2:
+                        delta_fig = self._attention_delta_eta_phi_figure(
+                            weights,
+                            x,
+                            valid,
+                            f"{prefix} layer {layer_idx} attention vs delta eta/phi",
+                        )
+                        if delta_fig is not None:
+                            figures[f"{prefix}/layer_{layer_idx}_delta_eta_phi_attention"] = delta_fig
 
         return stats, figures
 
@@ -351,6 +400,7 @@ class PHA_FSQ_VAE(L.LightningModule):
                     diagnostics[block_name],
                     mask,
                     f"attention/{block_name}",
+                    x=x,
                 )
                 stats.update(block_stats)
                 figures.update(block_figures)

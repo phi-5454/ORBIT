@@ -11,6 +11,7 @@ test_files: "./pq_files_test.txt"
 output_dir: "outputs/"
 train_val_split: [0.80, 0.20]
 split_random_seed: 42
+shuffle_train: True
 run_validation: True
 run_test: False
 earlystopping_patience: 5
