@@ -188,7 +188,11 @@ class ParquetFeatureDataset(IterableDataset):
                     axis=1,
                     clip=True,
                 )
-                filled = ak.fill_none(padded, 0.0)
+                filled = ak.fill_none(
+                    padded,
+                    [0.0] * len(self.selected_features),
+                    axis=1,
+                )
                 np_batch = ak.to_numpy(filled).astype(np.float32, copy=False)
                 padded_events = torch.from_numpy(np_batch)
 
