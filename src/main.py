@@ -20,6 +20,34 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SRC_DIR = BASE_DIR / "src"
 RESOURCE_DIR = BASE_DIR / "resources"
 
+def _as_list(value, field_name):
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, (list, tuple)):
+        return list(value)
+    raise TypeError(f"{field_name} must be a string or a list of strings, got {type(value).__name__}")
+
+
+def _resolve_path(path):
+    path = Path(os.path.expanduser(path))
+    if path.is_absolute():
+        return path
+    return BASE_DIR / path
+
+
+def _read_file_lists(file_lists, field_name):
+    parquet_files = []
+    for file_list in _as_list(file_lists, field_name):
+        file_list_path = _resolve_path(file_list)
+        with open(file_list_path) as f:
+            parquet_files.extend(
+                line.strip()
+                for line in f
+                if line.strip() and not line.lstrip().startswith("#")
+            )
+    return parquet_files
+
+
 def make_run_name(base_name=None):
     if base_name is None:
         return None
@@ -58,13 +86,11 @@ def main(cfg: DictConfig):
     # environemnt setup
     load_dotenv(dotenv_path=str(BASE_DIR / config["wandb_env"]), override=True)
 
-    with open(str(BASE_DIR / config["train_val_files"])) as f:
-        lines_train_val = f.read().splitlines()
+    lines_train_val = _read_file_lists(config["train_val_files"], "train_val_files")
 
     lines_test = None
     if(config["run_test"]):
-        with open(str(BASE_DIR / config["test_files"])) as f:
-            lines_test = f.read().splitlines()
+        lines_test = _read_file_lists(config["test_files"], "test_files")
 
     # Explicit login (relies on WANDB_API_KEY being in the env)
     wandb.login()

@@ -6,6 +6,8 @@ defaults:
 
 run_name: "test_run"
 wandb_env: "../wandb_api_key.env"
+# May be a single .txt file or a list of .txt files.
+# Example: ["./trainval_file_lists/VBFHbb.txt", "./trainval_file_lists/ggHbb.txt"]
 train_val_files: "./pq_files_train_val.txt"
 test_files: "./pq_files_test.txt"
 output_dir: "outputs/"
