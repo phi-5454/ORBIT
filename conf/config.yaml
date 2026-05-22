@@ -62,9 +62,21 @@ multirun:
     - "metrics/mse_Phi"
     - "metrics/mse_pT"
   codebook_configs:
-    - label: "mu_5x4x4_alpha_1024"
-      fsq_mu_levels: [5, 4, 4]
-      fsq_alpha_levels: [1024]
-    - label: "mu_8x8x4_alpha_1024"
-      fsq_mu_levels: [8, 8, 4]
-      fsq_alpha_levels: [1024]
+    - label: "fsq_10"
+      fsq_mu_levels: [10, 10, 10]
+      fsq_alpha_levels: []
+    - label: "fsq_15"
+      fsq_mu_levels: [15, 15, 15]
+      fsq_alpha_levels: []
+    - label: "fsq_21"
+      fsq_mu_levels: [21, 21, 21]
+      fsq_alpha_levels: []
+    - label: "fsq_25"
+      fsq_mu_levels: [25, 25, 25]
+      fsq_alpha_levels: []
+    - label: "fsq_35"
+      fsq_mu_levels: [35, 35, 35]
+      fsq_alpha_levels: []
+    - label: "fsq_42"
+      fsq_mu_levels: [42, 42, 42]
+      fsq_alpha_levels: []

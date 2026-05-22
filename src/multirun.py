@@ -25,6 +25,39 @@ def _codebook_size(levels):
     return int(np.prod(np.array(levels, dtype=np.int64)))
 
 
+def _codebook_metadata(model_config):
+    default_quantizer = model_config.get("quantizer", "fsq")
+    mu_quantizer = model_config.get("mu_quantizer") or default_quantizer
+    alpha_quantizer = model_config.get("alpha_quantizer") or default_quantizer
+
+    def branch_metadata(branch, quantizer):
+        if quantizer == "vq":
+            dim = int(model_config.get(f"vq_{branch}_dim", 0))
+            num_codes = int(model_config.get(f"vq_{branch}_num_codes", 1)) if dim > 0 else 1
+            return f"num_codes={num_codes},dim={dim}", num_codes
+        if quantizer == "fsq":
+            levels = model_config[f"fsq_{branch}_levels"]
+            return str(levels), _codebook_size(levels)
+        raise ValueError(f"Unsupported {branch} quantizer: {quantizer}")
+
+    mu_levels, mu_codebook_size = branch_metadata("mu", mu_quantizer)
+    alpha_levels, alpha_codebook_size = branch_metadata("alpha", alpha_quantizer)
+    return {
+        "quantizer": (
+            mu_quantizer
+            if mu_quantizer == alpha_quantizer
+            else f"mu:{mu_quantizer},alpha:{alpha_quantizer}"
+        ),
+        "mu_quantizer": mu_quantizer,
+        "alpha_quantizer": alpha_quantizer,
+        "mu_levels": mu_levels,
+        "alpha_levels": alpha_levels,
+        "mu_codebook_size": mu_codebook_size,
+        "alpha_codebook_size": alpha_codebook_size,
+        "total_codebook_size": mu_codebook_size * alpha_codebook_size,
+    }
+
+
 def _latest_file(pattern):
     files = glob.glob(pattern)
     if not files:
@@ -84,11 +117,7 @@ def _build_task_specs(config, suite_id):
 
         for seed in seeds:
             run_config = _build_run_config(config, codebook_config, seed)
-            mu_levels = run_config["model"]["fsq_mu_levels"]
-            alpha_levels = run_config["model"]["fsq_alpha_levels"]
-            mu_codebook_size = _codebook_size(mu_levels)
-            alpha_codebook_size = _codebook_size(alpha_levels)
-            total_codebook_size = mu_codebook_size * alpha_codebook_size
+            codebook_meta = _codebook_metadata(run_config["model"])
             run_name = f"{suite_id}_{label}_seed_{seed}"
             run_config["run_name"] = run_name
 
@@ -99,11 +128,7 @@ def _build_task_specs(config, suite_id):
                     "seed": seed,
                     "run_name": run_name,
                     "run_config": run_config,
-                    "mu_levels": mu_levels,
-                    "alpha_levels": alpha_levels,
-                    "mu_codebook_size": mu_codebook_size,
-                    "alpha_codebook_size": alpha_codebook_size,
-                    "total_codebook_size": total_codebook_size,
+                    **codebook_meta,
                 }
             )
 
@@ -160,6 +185,11 @@ def _build_run_config(base_config, codebook_config, seed):
 
     for key, value in codebook_config.get("model_overrides", {}).items():
         model_config[key] = value
+
+    reserved_keys = {"label", "overrides", "model_overrides", "fsq_mu_levels", "fsq_alpha_levels"}
+    for key, value in codebook_config.items():
+        if key not in reserved_keys:
+            model_config[key] = value
 
     for key, value in codebook_config.get("overrides", {}).items():
         run_config[key] = value
@@ -221,8 +251,11 @@ def run_codebook_multirun(config, train_val_files, test_files):
             "run_name": task["run_name"],
             "label": task["label"],
             "seed": task["seed"],
-            "mu_levels": str(task["mu_levels"]),
-            "alpha_levels": str(task["alpha_levels"]),
+            "quantizer": task["quantizer"],
+            "mu_quantizer": task["mu_quantizer"],
+            "alpha_quantizer": task["alpha_quantizer"],
+            "mu_levels": task["mu_levels"],
+            "alpha_levels": task["alpha_levels"],
             "mu_codebook_size": task["mu_codebook_size"],
             "alpha_codebook_size": task["alpha_codebook_size"],
             "total_codebook_size": task["total_codebook_size"],

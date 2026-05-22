@@ -25,15 +25,19 @@ class PHA_FSQ_VAE(L.LightningModule):
         self.test_step_outputs = []
         self.val_correlation_diagnostics = None
 
-        self.dim_mu = len(model_cfg["fsq_mu_levels"])
-        self.dim_alpha = len(model_cfg["fsq_alpha_levels"])
+        default_quantizer = model_cfg.get("quantizer", "fsq")
+        self.mu_quantizer_type = model_cfg.get("mu_quantizer") or default_quantizer
+        self.alpha_quantizer_type = model_cfg.get("alpha_quantizer") or default_quantizer
+        self.quantizer_type = (
+            self.mu_quantizer_type
+            if self.mu_quantizer_type == self.alpha_quantizer_type
+            else f"mu:{self.mu_quantizer_type},alpha:{self.alpha_quantizer_type}"
+        )
 
-        self.dim_mu = len(model_cfg["fsq_mu_levels"])
-        self.dim_alpha = len(model_cfg["fsq_alpha_levels"])
+        self.dim_mu, self.total_codes_mu = self._branch_quantizer_shape("mu")
+        self.dim_alpha, self.total_codes_alpha = self._branch_quantizer_shape("alpha")
 
         # Calculate total possible codes safely (default to 1 if empty to avoid div by zero)
-        self.total_codes_mu = np.prod(model_cfg["fsq_mu_levels"]) if self.dim_mu > 0 else 1
-        self.total_codes_alpha = np.prod(model_cfg["fsq_alpha_levels"]) if self.dim_alpha > 0 else 1
         self.total_codes_combined = self.total_codes_mu * self.total_codes_alpha
 
         # Create persistent sets for Validation
@@ -80,8 +84,8 @@ class PHA_FSQ_VAE(L.LightningModule):
         # TODO: Rework phi
         self.phi = tm.Phi(dim_in=hidden_dim, dim_alpha=self.dim_alpha, dim_mu=self.dim_mu)
 
-        self.quantizer_mu = tm.FSQ(levels=model_cfg["fsq_mu_levels"])
-        self.quantizer_alpha = tm.FSQ(levels=model_cfg["fsq_alpha_levels"])
+        self.quantizer_mu = self._build_branch_quantizer("mu", self.dim_mu)
+        self.quantizer_alpha = self._build_branch_quantizer("alpha", self.dim_alpha)
 
         # TODO: Rework psi
         self.psi = tm.Psi(dim_mu=self.dim_mu, dim_alpha=self.dim_alpha, dim_out=hidden_dim)
@@ -97,31 +101,102 @@ class PHA_FSQ_VAE(L.LightningModule):
         self.decoder = tm.NormformerEncoder(num_layers=num_enc_dec_layers, model_dim=hidden_dim, nhead=num_heads, mlp_expansion_factor=nf_mlp_expansion_factor, dropout=nf_dropout)
 
         self.evaluator = PhysicsEvaluator(data_level=self.data_level)
+    def _branch_quantizer_type(self, branch):
+        if branch == "mu":
+            return self.mu_quantizer_type
+        if branch == "alpha":
+            return self.alpha_quantizer_type
+        raise ValueError(f"Unknown quantizer branch: {branch}")
+    def _branch_quantizer_shape(self, branch):
+        quantizer_type = self._branch_quantizer_type(branch)
+        if quantizer_type == "fsq":
+            levels = self.model_cfg[f"fsq_{branch}_levels"]
+            return len(levels), np.prod(levels) if len(levels) > 0 else 1
+        if quantizer_type == "vq":
+            dim = int(self.model_cfg.get(f"vq_{branch}_dim", 0))
+            num_codes = int(self.model_cfg.get(f"vq_{branch}_num_codes", 1)) if dim > 0 else 1
+            return dim, num_codes
+        raise ValueError(f"Unsupported {branch} quantizer: {quantizer_type}")
+    def _build_branch_quantizer(self, branch, dim):
+        if dim <= 0:
+            return None
+
+        quantizer_type = self._branch_quantizer_type(branch)
+        if quantizer_type == "fsq":
+            return tm.FSQ(levels=self.model_cfg[f"fsq_{branch}_levels"])
+        if quantizer_type == "vq":
+            return tm.VQQuantizer(
+                feature_size=dim,
+                num_codes=int(self.model_cfg[f"vq_{branch}_num_codes"]),
+                beta=float(self.model_cfg.get("vq_beta", 0.95)),
+                gradient_estimator=self.model_cfg.get("vq_gradient_estimator", "ste"),
+                kmeans_init=bool(self.model_cfg.get("vq_kmeans_init", False)),
+                sync_nu=float(self.model_cfg.get("vq_sync_nu", 0.0)),
+            )
+        raise ValueError(f"Unsupported {branch} quantizer: {quantizer_type}")
+    def _empty_quantizer_loss(self):
+        return torch.zeros((), device=self.device)
+    def _quantize_one(self, branch, quantizer, z, dim):
+        if dim <= 0:
+            return z, z, z, self._empty_quantizer_loss()
+
+        if self._branch_quantizer_type(branch) == "fsq":
+            z_hat = quantizer(z)
+            z_decoded = z + (z_hat - z).detach()
+            return z_decoded, z_hat, z_hat, self._empty_quantizer_loss()
+
+        z_decoded, z_hat, codes, loss = quantizer(z)
+        return z_decoded, z_hat, codes, loss
+    def _quantize_latents(self, z_mu, z_alpha):
+        z_dec_mu, z_hat_mu, z_track_mu, loss_mu = self._quantize_one(
+            "mu",
+            self.quantizer_mu,
+            z_mu,
+            self.dim_mu,
+        )
+        z_dec_alpha, z_hat_alpha, z_track_alpha, loss_alpha = self._quantize_one(
+            "alpha",
+            self.quantizer_alpha,
+            z_alpha,
+            self.dim_alpha,
+        )
+        return z_dec_mu, z_dec_alpha, z_hat_mu, z_hat_alpha, z_track_mu, z_track_alpha, loss_mu, loss_alpha
     def _track_codebook(self, z_hat_mu, z_hat_alpha, mask, prefix="val"):
         """Extracts unique codes from the current batch and adds them to the global epoch sets."""
-        z_mu_valid = z_hat_mu[mask]
-        z_alpha_valid = z_hat_alpha[mask]
-
         # Route to the correct sets
         if prefix == "val":
             set_mu, set_alpha, set_comb = self.val_used_codes_mu, self.val_used_codes_alpha, self.val_used_codes_combined
         else:
             set_mu, set_alpha, set_comb = self.test_used_codes_mu, self.test_used_codes_alpha, self.test_used_codes_combined
 
+        def add_unique_codes(codes, target_set):
+            codes_valid = codes[mask]
+            if codes_valid.ndim == 1:
+                uniq = torch.unique(codes_valid).detach().cpu().numpy()
+                for code in uniq:
+                    target_set.add(int(code))
+                return
+
+            uniq = torch.unique(codes_valid, dim=0).detach().cpu().numpy()
+            for vec in np.round(uniq, decimals=4):
+                target_set.add(tuple(vec))
+
         # 1. Track Mu
         if self.dim_mu > 0:
-            uniq_mu = torch.unique(z_mu_valid, dim=0).detach().cpu().numpy()
-            for vec in np.round(uniq_mu, decimals=4):
-                set_mu.add(tuple(vec))
+            add_unique_codes(z_hat_mu, set_mu)
 
         # 2. Track Alpha
         if self.dim_alpha > 0:
-            uniq_alpha = torch.unique(z_alpha_valid, dim=0).detach().cpu().numpy()
-            for vec in np.round(uniq_alpha, decimals=4):
-                set_alpha.add(tuple(vec))
+            add_unique_codes(z_hat_alpha, set_alpha)
 
         # 3. Track Combined Space (The true cross-product utilization)
         if self.dim_mu > 0 and self.dim_alpha > 0:
+            z_mu_valid = z_hat_mu[mask]
+            z_alpha_valid = z_hat_alpha[mask]
+            if z_mu_valid.ndim == 1:
+                z_mu_valid = z_mu_valid[:, None]
+            if z_alpha_valid.ndim == 1:
+                z_alpha_valid = z_alpha_valid[:, None]
             z_combined = torch.cat([z_mu_valid, z_alpha_valid], dim=-1)
             uniq_combined = torch.unique(z_combined, dim=0).detach().cpu().numpy()
             for vec in np.round(uniq_combined, decimals=4):
@@ -160,26 +235,30 @@ class PHA_FSQ_VAE(L.LightningModule):
 
         # 3. Quantize
         if(self.model_cfg["skip_quantization"]==True):
-            z_hat_mu = self.quantizer_mu(z_mu)
-            z_hat_alpha = self.quantizer_alpha(z_alpha)
-
+            z_track_mu = z_mu
+            z_track_alpha = z_alpha
             z_decoded = self.psi(z_mu, z_alpha)
+            self._last_quantizer_loss_mu = self._empty_quantizer_loss()
+            self._last_quantizer_loss_alpha = self._empty_quantizer_loss()
         else:
-            z_hat_mu = self.quantizer_mu(z_mu)
-            z_hat_alpha = self.quantizer_alpha(z_alpha)
-
-            # 4. Straight Through Estimator (STE)
-            # TODO: abstract this away 
-            z_ste_mu = z_mu + (z_hat_mu - z_mu).detach()
-            z_ste_alpha = z_alpha + (z_hat_alpha - z_alpha).detach()
-
-            # 5. Merge and Decode
-            z_decoded = self.psi(z_ste_mu, z_ste_alpha)
+            (
+                z_dec_mu,
+                z_dec_alpha,
+                _,
+                _,
+                z_track_mu,
+                z_track_alpha,
+                loss_mu,
+                loss_alpha,
+            ) = self._quantize_latents(z_mu, z_alpha)
+            self._last_quantizer_loss_mu = loss_mu
+            self._last_quantizer_loss_alpha = loss_alpha
+            z_decoded = self.psi(z_dec_mu, z_dec_alpha)
 
         x_hat_lat = self.decoder(z_decoded, mask, self.model_cfg["use_attention"])
         x_hat = self.output_proj(x_hat_lat)
 
-        return x_hat, z_mu, z_hat_mu, z_alpha, z_hat_alpha
+        return x_hat, z_mu, z_track_mu, z_alpha, z_track_alpha
     def forward_with_diagnostics(self, x, mask):
         x_proj = self.input_proj(x)
         z_encoded, encoder_diags = self.encoder(
@@ -190,15 +269,27 @@ class PHA_FSQ_VAE(L.LightningModule):
         )
 
         z_mu, z_alpha = self.phi(z_encoded)
-        z_hat_mu = self.quantizer_mu(z_mu)
-        z_hat_alpha = self.quantizer_alpha(z_alpha)
 
         if self.model_cfg["skip_quantization"] == True:
+            z_track_mu = z_mu
+            z_track_alpha = z_alpha
             z_decoded = self.psi(z_mu, z_alpha)
+            self._last_quantizer_loss_mu = self._empty_quantizer_loss()
+            self._last_quantizer_loss_alpha = self._empty_quantizer_loss()
         else:
-            z_ste_mu = z_mu + (z_hat_mu - z_mu).detach()
-            z_ste_alpha = z_alpha + (z_hat_alpha - z_alpha).detach()
-            z_decoded = self.psi(z_ste_mu, z_ste_alpha)
+            (
+                z_dec_mu,
+                z_dec_alpha,
+                _,
+                _,
+                z_track_mu,
+                z_track_alpha,
+                loss_mu,
+                loss_alpha,
+            ) = self._quantize_latents(z_mu, z_alpha)
+            self._last_quantizer_loss_mu = loss_mu
+            self._last_quantizer_loss_alpha = loss_alpha
+            z_decoded = self.psi(z_dec_mu, z_dec_alpha)
 
         x_hat_lat, decoder_diags = self.decoder(
             z_decoded,
@@ -208,7 +299,7 @@ class PHA_FSQ_VAE(L.LightningModule):
         )
         x_hat = self.output_proj(x_hat_lat)
 
-        return x_hat, z_mu, z_hat_mu, z_alpha, z_hat_alpha, {
+        return x_hat, z_mu, z_track_mu, z_alpha, z_track_alpha, {
             "encoder": encoder_diags,
             "decoder": decoder_diags,
         }
@@ -440,10 +531,15 @@ class PHA_FSQ_VAE(L.LightningModule):
             loss_abs = (loss_abs_full * mask_3d).sum() / mask_3d.sum().clamp(min=1.0)
             loss_l2 = (loss_l2_full * mask_3d).sum() / mask_3d.sum().clamp(min=1.0)
 
-            # 5. Calculate latent losses (unchanged)
-            loss_commitment = F.mse_loss(z_mu, z_hat_mu.detach()) if self.dim_mu > 0 else 0
+            if self.mu_quantizer_type == "vq":
+                loss_commitment = self._last_quantizer_loss_mu if self.dim_mu > 0 else 0
+            else:
+                loss_commitment = F.mse_loss(z_mu, z_hat_mu.detach()) if self.dim_mu > 0 else 0
 
-            loss_amplitude = F.mse_loss(z_alpha, z_hat_alpha.detach()) if self.dim_alpha > 0 else 0
+            if self.alpha_quantizer_type == "vq":
+                loss_amplitude = self._last_quantizer_loss_alpha if self.dim_alpha > 0 else 0
+            else:
+                loss_amplitude = F.mse_loss(z_alpha, z_hat_alpha.detach()) if self.dim_alpha > 0 else 0
 
             # 6. Total loss
             loss_pha = loss_abs + (beta * loss_commitment) + loss_amplitude
