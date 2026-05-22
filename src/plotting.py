@@ -296,12 +296,23 @@ def attention_delta_eta_phi_figure(weights, x, valid, title, exclude_self=False)
     dphi_np = dphi[pair_mask].detach().cpu().numpy()
     weight_np = attn[pair_mask].detach().cpu().numpy()
 
-    hist, eta_edges, phi_edges = np.histogram2d(
+    weight_sum, eta_edges, phi_edges = np.histogram2d(
         deta_np,
         dphi_np,
         bins=(60, 64),
         range=((-6.0, 6.0), (-math.pi, math.pi)),
         weights=weight_np,
+    )
+    pair_count, _, _ = np.histogram2d(
+        deta_np,
+        dphi_np,
+        bins=(eta_edges, phi_edges),
+    )
+    hist = np.divide(
+        weight_sum,
+        pair_count,
+        out=np.zeros_like(weight_sum),
+        where=pair_count > 0,
     )
 
     fig, ax = plt.subplots(figsize=(6, 5))
@@ -314,7 +325,7 @@ def attention_delta_eta_phi_figure(weights, x, valid, title, exclude_self=False)
     ax.set_title(title)
     ax.set_xlabel(r"$\Delta\eta = \eta_\mathrm{query} - \eta_\mathrm{key}$")
     ax.set_ylabel(r"$\Delta\phi = \phi_\mathrm{query} - \phi_\mathrm{key}$")
-    fig.colorbar(im, ax=ax, label="attention weight sum")
+    fig.colorbar(im, ax=ax, label="mean attention weight per pair")
     return fig
 
 
