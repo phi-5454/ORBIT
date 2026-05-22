@@ -3,6 +3,8 @@
 **/outputs/
 **/wandb/
 
+run_training.sh
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
