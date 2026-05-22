@@ -1,8 +1,8 @@
 # TODO: scheduling, optimization?
 
 lr: 1e-3
-#hidden_dim: 64
-hidden_dim: 256
+hidden_dim: 64
+#hidden_dim: 256
 batch_size: 32
 latent_nodes: 32
 quantizer: "fsq" # Backward-compatible default for both branches: "fsq" or "vq"
