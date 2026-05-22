@@ -1,4 +1,3 @@
-from line_profiler import profile
 import torch
 import torch.nn as nn
 
@@ -224,7 +223,6 @@ class NormformerBlock(nn.Module):
         # A LayerNorm applied to the output of the MLP before the residual connection.
         self.ln_post_ff = nn.LayerNorm(d_model)
 
-    @profile
     def forward(self, x, mask=None, use_attention=True, return_diagnostics=False):
         # --- Self-Attention Block ---
         # Pre-norm

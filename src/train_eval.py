@@ -1,16 +1,9 @@
-from datetime import datetime
+import datetime
 import os
+import uuid
 
-from line_profiler import profile
-import fastjet
 import lightning as L
-import matplotlib.pyplot as plt
 import numpy as np
-import pylorentz
-import seaborn as sns
-import torch
-import torch.nn.functional as F
-from dotenv import load_dotenv
 from pytorch_lightning.callbacks import LearningRateMonitor
 
 import wandb
@@ -36,7 +29,6 @@ def make_run_name(base_name=None):
 
 class TrainPipeline:
     # TODO: handle all the params
-    @profile
     def __init__(self, config, unique_run_name, train_val_files=[], test_files=[]) -> None:
         self.config = config
         train_val_split = np.array(self.config["train_val_split"])
@@ -45,7 +37,7 @@ class TrainPipeline:
         num_train = int(num_train_val * train_val_split_norm[0])
 
         #shuffle
-        seed = 42
+        seed = config.get("split_random_seed", 42)
         np.random.seed(seed)
         indices = np.random.permutation(num_train_val)
         train_val_files = np.array(train_val_files)[indices]
@@ -53,16 +45,24 @@ class TrainPipeline:
         train_files = [os.path.expanduser(path) for path in train_val_files[:max(num_train,1)]]
         val_files = [os.path.expanduser(path) for path in train_val_files[min(num_train, num_train_val - 1):]]
         test_files = [os.path.expanduser(path) for path in test_files] if test_files else test_files
+        data_level = config.get("data", {}).get("level", "particle")
+        if data_level not in config.get("data", {}):
+            raise ValueError(f"Unknown data.level '{data_level}'. Add a matching config.data.{data_level} block.")
+        data_cfg = config.get("data", {}).get(data_level, {})
 
         self.datamodule = ParquetDataModule(
             train_files,
             val_files,
             test_files,
+            features=data_cfg.get("features"),
+            selected_features=data_cfg.get("selected_features"),
             window_particles=config["model"]["window_particles"],
             batch_size=config["model"]["batch_size"],
             num_workers=config["num_dataload_workers"],
             shuffle_train=config.get("shuffle_train", True),
             shuffle_seed=config.get("split_random_seed", 42),
+            mask_column=data_cfg.get("mask_column"),
+            mask_min_value=data_cfg.get("mask_min_value", 0.0),
         )
 
         self.unique_run_name = unique_run_name
@@ -98,8 +98,6 @@ class TrainPipeline:
             **config["trainer"],
             profiler="simple"
         )
-
-    @profile
     def run(self, run_validation=True, run_test=False):
 
         mode=self.config["mode"]
@@ -114,7 +112,11 @@ class TrainPipeline:
 
         # TODO: Handle the outpts more centrally
         output_dir = f"{self.config["output_dir"]}/{self.unique_run_name}"
-        model = PHA_FSQ_VAE(model_cfg, output_dir=output_dir)
+        model = PHA_FSQ_VAE(
+            model_cfg,
+            output_dir=output_dir,
+            data_level=self.config.get("data", {}).get("level", "particle"),
+        )
         # model = PHA_FSQ_VAE(
         # input_dim=len(feature_cols),
         # hidden_dim=model_cfg["hidden_dim"],

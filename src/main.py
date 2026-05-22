@@ -1,4 +1,3 @@
-from line_profiler import profile
 import argparse
 import os
 from pathlib import Path
@@ -8,6 +7,7 @@ from dotenv import load_dotenv
 from omegaconf import DictConfig, OmegaConf
 
 import wandb
+from multirun import run_codebook_multirun
 from plotting import replot_jet_structure
 from train_eval import TrainPipeline
 import datetime
@@ -66,7 +66,6 @@ def make_run_name(base_name=None):
 @hydra.main(
     version_base=None, config_path=str(BASE_DIR / "conf"), config_name="config.yaml"
 )
-@profile
 def main(cfg: DictConfig):
     if(cfg["replot_only"]):
         npz_files = [f"{cfg["replot"]["in_base_dir"]}/{f}" for f in cfg["replot"]["in_files"]]
@@ -74,7 +73,6 @@ def main(cfg: DictConfig):
         replot_jet_structure(npz_files=npz_files, run_labels=cfg["replot"]["run_labels"], output_dir=f"{cfg["replot"]["in_base_dir"]}/combined_plots")
         return
 
-    unique_run_name = make_run_name(cfg["run_name"])
     BASE_DIR = Path(__file__).resolve().parent.parent
     SRC_DIR = BASE_DIR / "src"
     RESOURCE_DIR = BASE_DIR / "resources"
@@ -94,6 +92,17 @@ def main(cfg: DictConfig):
 
     # Explicit login (relies on WANDB_API_KEY being in the env)
     wandb.login()
+
+    if config.get("multirun", {}).get("enabled", False):
+        result = run_codebook_multirun(
+            config=config,
+            train_val_files=lines_train_val,
+            test_files=lines_test,
+        )
+        print(f"Done running multirun suite: {result['suite_dir']}")
+        return
+
+    unique_run_name = make_run_name(cfg["run_name"])
 
     # TODO: pass a sub-part of the config
     p = TrainPipeline(

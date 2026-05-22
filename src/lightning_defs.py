@@ -1,24 +1,24 @@
-from line_profiler import profile
 import os
-import math
+import json
 
 import lightning as L
-import matplotlib.pyplot as plt
 import torch
 import torch.nn.functional as F
 from torch.optim.lr_scheduler import LinearLR
 import numpy as np
 
 from eval_metrics import PhysicsEvaluator
+from plotting import attention_delta_eta_phi_figure, attention_map_figure, close_figure
 import torch_modules as tm
 import wandb
 
 
 class PHA_FSQ_VAE(L.LightningModule):
-    def __init__(self, model_cfg, output_dir):
+    def __init__(self, model_cfg, output_dir, data_level="particle"):
         super().__init__()
         self.model_cfg = model_cfg
         self.output_dir = output_dir
+        self.data_level = data_level
         self.save_hyperparameters()
 
         self.total_train_events_seen = 0
@@ -96,9 +96,7 @@ class PHA_FSQ_VAE(L.LightningModule):
         '''
         self.decoder = tm.NormformerEncoder(num_layers=num_enc_dec_layers, model_dim=hidden_dim, nhead=num_heads, mlp_expansion_factor=nf_mlp_expansion_factor, dropout=nf_dropout)
 
-        self.evaluator = PhysicsEvaluator()
-
-    @profile
+        self.evaluator = PhysicsEvaluator(data_level=self.data_level)
     def _track_codebook(self, z_hat_mu, z_hat_alpha, mask, prefix="val"):
         """Extracts unique codes from the current batch and adds them to the global epoch sets."""
         z_mu_valid = z_hat_mu[mask]
@@ -128,8 +126,6 @@ class PHA_FSQ_VAE(L.LightningModule):
             uniq_combined = torch.unique(z_combined, dim=0).detach().cpu().numpy()
             for vec in np.round(uniq_combined, decimals=4):
                 set_comb.add(tuple(vec))
-
-    @profile
     def _log_and_clear_utilization(self, prefix="val"):
         """Calculates utilization percentages, logs them, and safely clears the sets."""
         if prefix == "val":
@@ -151,8 +147,6 @@ class PHA_FSQ_VAE(L.LightningModule):
             self.log(f"{prefix}_metrics/utilization_combined", len(set_comb) / self.total_codes_combined, sync_dist=True)
             self.log(f"{prefix}_metrics/active_codes_combined", float(len(set_comb)), sync_dist=True)
             set_comb.clear()
-
-    @profile
     def forward(self, x, mask):
         # 1. Encode
         x_proj = self.input_proj(x)
@@ -186,8 +180,6 @@ class PHA_FSQ_VAE(L.LightningModule):
         x_hat = self.output_proj(x_hat_lat)
 
         return x_hat, z_mu, z_hat_mu, z_alpha, z_hat_alpha
-
-    @profile
     def forward_with_diagnostics(self, x, mask):
         x_proj = self.input_proj(x)
         z_encoded, encoder_diags = self.encoder(
@@ -226,46 +218,6 @@ class PHA_FSQ_VAE(L.LightningModule):
         indices = mask.float().argmax(dim=1)
         return indices, has_valid
 
-    def _attention_delta_eta_phi_figure(self, weights, x, valid, title):
-        # Inputs are normalized as eta / 3 and phi / pi in the dataloader.
-        attn = weights.mean(dim=1)
-        eta = x[..., 0] * 3.0
-        phi = x[..., 1] * math.pi
-
-        deta = eta[:, :, None] - eta[:, None, :]
-        dphi = phi[:, :, None] - phi[:, None, :]
-        dphi = torch.remainder(dphi + math.pi, 2 * math.pi) - math.pi
-
-        pair_mask = valid[:, :, None] & valid[:, None, :]
-        if not pair_mask.any():
-            return None
-
-        deta_np = deta[pair_mask].detach().cpu().numpy()
-        dphi_np = dphi[pair_mask].detach().cpu().numpy()
-        weight_np = attn[pair_mask].detach().cpu().numpy()
-
-        hist, eta_edges, phi_edges = np.histogram2d(
-            deta_np,
-            dphi_np,
-            bins=(60, 64),
-            range=((-6.0, 6.0), (-math.pi, math.pi)),
-            weights=weight_np,
-        )
-
-        fig, ax = plt.subplots(figsize=(6, 5))
-        im = ax.imshow(
-            hist.T,
-            origin="lower",
-            extent=[eta_edges[0], eta_edges[-1], phi_edges[0], phi_edges[-1]],
-            aspect="auto",
-        )
-        ax.set_title(title)
-        ax.set_xlabel(r"$\Delta\eta = \eta_\mathrm{query} - \eta_\mathrm{key}$")
-        ax.set_ylabel(r"$\Delta\phi = \phi_\mathrm{query} - \phi_\mathrm{key}$")
-        fig.colorbar(im, ax=ax, label="attention weight sum")
-        return fig
-
-    @profile
     def _attention_diagnostic_stats(self, diagnostics, mask, prefix, x=None):
         stats = {}
         figures = {}
@@ -319,16 +271,11 @@ class PHA_FSQ_VAE(L.LightningModule):
                 n_valid = int(valid[first_event].sum().item())
                 if n_valid > 1:
                     matrix = weights[first_event, :, :n_valid, :n_valid].mean(dim=0).detach().cpu().numpy()
-                    fig, ax = plt.subplots(figsize=(5, 4))
-                    im = ax.imshow(matrix, vmin=0.0, vmax=max(float(matrix.max()), 1e-6), aspect="auto")
-                    ax.set_title(f"{prefix} layer {layer_idx} attention")
-                    ax.set_xlabel("key particle")
-                    ax.set_ylabel("query particle")
-                    fig.colorbar(im, ax=ax)
+                    fig = attention_map_figure(matrix, f"{prefix} layer {layer_idx} attention")
                     figures[f"{prefix}/layer_{layer_idx}_attention_map"] = fig
 
                     if x is not None and x.shape[-1] >= 2:
-                        delta_fig = self._attention_delta_eta_phi_figure(
+                        delta_fig = attention_delta_eta_phi_figure(
                             weights,
                             x,
                             valid,
@@ -337,9 +284,17 @@ class PHA_FSQ_VAE(L.LightningModule):
                         if delta_fig is not None:
                             figures[f"{prefix}/layer_{layer_idx}_delta_eta_phi_attention"] = delta_fig
 
-        return stats, figures
+                        offdiag_delta_fig = attention_delta_eta_phi_figure(
+                            weights,
+                            x,
+                            valid,
+                            f"{prefix} layer {layer_idx} attention vs delta eta/phi, i != j",
+                            exclude_self=True,
+                        )
+                        if offdiag_delta_fig is not None:
+                            figures[f"{prefix}/layer_{layer_idx}_delta_eta_phi_attention_no_self"] = offdiag_delta_fig
 
-    @profile
+        return stats, figures
     def _build_context_probes(self, x, mask):
         target_idx, has_valid = self._first_valid_indices(mask)
         batch_idx = torch.arange(x.shape[0], device=x.device)
@@ -355,8 +310,6 @@ class PHA_FSQ_VAE(L.LightningModule):
         swapped_mask[batch_idx, target_idx] = has_valid
 
         return target_idx, has_valid, self_only_x, self_only_mask, swapped_x, swapped_mask
-
-    @profile
     def _collect_correlation_diagnostics(self, x, mask):
         max_events = int(self.model_cfg.get("diagnostic_max_events", 8))
         x = x[:max_events]
@@ -406,8 +359,6 @@ class PHA_FSQ_VAE(L.LightningModule):
                 figures.update(block_figures)
 
         return stats, figures
-
-    @profile
     def _log_correlation_diagnostics(self):
         diagnostics = self.val_correlation_diagnostics
         self.val_correlation_diagnostics = None
@@ -422,7 +373,7 @@ class PHA_FSQ_VAE(L.LightningModule):
 
         if not self.trainer.is_global_zero:
             for fig in figures.values():
-                plt.close(fig)
+                close_figure(fig)
             return
 
         if isinstance(self.logger, L.pytorch.loggers.WandbLogger):
@@ -437,9 +388,7 @@ class PHA_FSQ_VAE(L.LightningModule):
                 fig.savefig(os.path.join(save_dir, f"val_diagnostics_{clean_key}_step_{self.global_step}.png"))
 
         for fig in figures.values():
-            plt.close(fig)
-
-    @profile
+            close_figure(fig)
     def configure_optimizers(self):
         # Tip: AdamW (with weight decay) is vastly superior to Adam for Transformers
         optimizer = torch.optim.AdamW(
@@ -465,8 +414,6 @@ class PHA_FSQ_VAE(L.LightningModule):
                 "frequency": 1,
             },
         }
-
-    @profile
     def compute_losses(self, x, mask, beta=0.25, phi_idx=1):
             """
             Calculates losses while respecting the periodicity of the phi angle.
@@ -502,10 +449,6 @@ class PHA_FSQ_VAE(L.LightningModule):
             loss_pha = loss_abs + (beta * loss_commitment) + loss_amplitude
 
             return loss_pha, loss_l2, loss_abs, loss_commitment, loss_amplitude, x_hat, z_hat_mu, z_hat_alpha
-
-
-
-    @profile
     def _evaluate_and_log(self, sample_tuple, prefix="val"):
         """Handles evaluator routing for both validation and testing."""
         if sample_tuple is None:
@@ -516,11 +459,13 @@ class PHA_FSQ_VAE(L.LightningModule):
 
         # Initialize a dictionary to catch all the raw histogram arrays
         histograms_to_save = {}
+        metrics_to_save = {}
 
         for key, value in results.items():
             # 1. Route Scalars
             if isinstance(value, (int, float)):
                 self.log(f"{prefix}_metrics/{key}", value, sync_dist=True)
+                metrics_to_save[key] = float(value)
 
             # 2. Route Figures
             elif hasattr(value, "savefig"):
@@ -542,7 +487,7 @@ class PHA_FSQ_VAE(L.LightningModule):
                         f"local_debug_plots/{prefix}_{key.replace('/', '_')}_step_{self.global_step}.png"
                     )
 
-                plt.close(fig)
+                close_figure(fig)
                 
             # 3. Route Raw Data (NumPy Arrays for Histograms)
             elif isinstance(value, np.ndarray):
@@ -571,6 +516,13 @@ class PHA_FSQ_VAE(L.LightningModule):
                 )
                 artifact.add_file(filepath)
                 self.logger.experiment.log_artifact(artifact)
+
+        if metrics_to_save:
+            save_dir = self.output_dir + "/" + "saved_metrics"
+            os.makedirs(save_dir, exist_ok=True)
+            filepath = f"{save_dir}/{prefix}_metrics_step_{self.global_step}.json"
+            with open(filepath, "w") as f:
+                json.dump(metrics_to_save, f, indent=2, sort_keys=True)
     '''
     def on_fit_start(self) -> None:
         super().on_fit_start()
@@ -583,8 +535,6 @@ class PHA_FSQ_VAE(L.LightningModule):
             return
 
     '''
-
-    @profile
     def training_step(self, batch, batch_idx):
         # WELD: Unpack the yielded tuple
         x, mask = batch
@@ -619,8 +569,6 @@ class PHA_FSQ_VAE(L.LightningModule):
         )
 
         return loss_pha
-
-    @profile
     def validation_step(self, batch, batch_idx):
         x, mask = batch
         loss_pha, loss_l2, loss_abs, loss_commit, loss_amp, x_hat, z_hat_mu, z_hat_alpha = self.compute_losses(
@@ -645,8 +593,6 @@ class PHA_FSQ_VAE(L.LightningModule):
             self.val_sample = (x.detach(), x_hat.detach(), mask.detach())
             if not self.trainer.sanity_checking and self.val_correlation_diagnostics is None:
                 self.val_correlation_diagnostics = self._collect_correlation_diagnostics(x.detach(), mask.detach())
-
-    @profile
     def test_step(self, batch, batch_idx):
         x, mask = batch
         loss_pha, loss_l2, loss_abs, loss_commit, loss_amp, x_hat, z_hat_mu, z_hat_alpha = self.compute_losses(
@@ -672,8 +618,6 @@ class PHA_FSQ_VAE(L.LightningModule):
             "x_hat": x_hat.detach().cpu(),
             "mask": mask.detach().cpu()
         })
-
-    @profile
     def on_validation_epoch_end(self):
         if self.trainer.sanity_checking:
             return
@@ -686,8 +630,6 @@ class PHA_FSQ_VAE(L.LightningModule):
 
         # 3. Log particle-correlation diagnostics
         self._log_correlation_diagnostics()
-
-    @profile
     def on_test_epoch_end(self):
         # 1. Reconstruct giant tensor block
         x_all = torch.cat([b["x"] for b in self.test_step_outputs], dim=0)
