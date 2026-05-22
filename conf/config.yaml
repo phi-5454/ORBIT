@@ -52,6 +52,10 @@ data:
 multirun:
   enabled: False
   name: "codebook_size_scan"
+  suite_id: null
+  job_index: 0
+  job_count: 1
+  collect_only: False
   seeds: [42]
   y_metrics:
     - "metrics/mse_Eta"
