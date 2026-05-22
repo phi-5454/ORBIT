@@ -10,10 +10,14 @@ from torch.utils.data import IterableDataset, DataLoader
 import lightning as L
 import torch.nn.functional as F
 import numpy as np
-import matplotlib.pyplot as plt
-import seaborn as sns
 import wandb
 import pathlib
+from src.plotting import (
+    close_figure,
+    exploratory_energy_histograms,
+    exploratory_feature_histograms,
+    show_figure,
+)
 
 import torch.nn as nn
 from torch.nn.utils.rnn import pad_sequence
@@ -393,7 +397,7 @@ wandb_logger = L.pytorch.loggers.WandbLogger(
     project=os.getenv("WANDB_PROJECT"),
     entity=os.getenv("WANDB_ENTITY"),
     #name="whole_event_pha_fsq",
-    log_model="all" # Note: If checkpoints become too large, set this to False
+    log_model="all", # Note: If checkpoints become too large, set this to False
     log_graph=True
 )
 
@@ -471,77 +475,27 @@ x_hat_np = x_hat_batch.cpu().numpy()
 # In[ ]:
 
 
-# Set up the figure
-fig, axes = plt.subplots(1, 3, figsize=(18, 5))
-fig.suptitle("FSQ-VAE: Original vs. Reconstructed Features", fontsize=16)
-
 feature_names = feature_cols
-
-for i in range(3):
-    # Plot Original
-    sns.histplot(x_np[:, i], bins=50, color="blue", alpha=0.5, 
-                 label="Original", kde=False, stat="density", ax=axes[i])
-
-    # Plot Reconstructed
-    sns.histplot(x_hat_np[:, i], bins=50, color="orange", alpha=0.5, 
-                 label="Reconstructed", kde=False, stat="density", ax=axes[i])
-
-    axes[i].set_title(f"{feature_names[i]} (MSE: {mse_per_feature[i]:.4f})")
-    axes[i].legend()
-
-plt.tight_layout()
-plt.show()
+fig = exploratory_feature_histograms(x_np, x_hat_np, mse_per_feature, feature_names)
+show_figure()
 
 
 # In[ ]:
 
 
-# Set up the figure
-fig, axs = plt.subplots(1, 2, figsize=(16, 5))
-#fig.suptitle("FSQ-VAE: Original vs. Reconstructed mass", fontsize=16)
-
-feature_names = feature_cols
-
-masses_orig = x_np[:,2] * np.cosh(x_np[:,0])
-masses_reco = x_hat_np[:,2] * np.cosh(x_hat_np[:,0])
-
-min_val = max(min(masses_orig.min(), masses_reco.min()), 1e-8) 
-max_val = max(masses_orig.max(), masses_reco.max()).max()
-log_bins = np.logspace(np.log10(min_val), np.log10(max_val), num=50)
-
-axs[0].set_title("FSQ-VAE: Original vs. Reconstructed mass", fontsize=16)
-sns.histplot(masses_orig, bins=log_bins, color="blue", alpha=0.5, 
-             label="Original", kde=False, stat="density", ax=axs[0])
-
-    # Plot Reconstructed
-sns.histplot(masses_reco, bins=log_bins, color="orange", alpha=0.5, 
-             label="Reconstructed", kde=False, stat="density", ax=axs[0])
-
-axs[1].set_title("FSQ-VAE: m_reco - m_original", fontsize=16)
-sns.histplot(masses_reco - masses_orig, bins=50, color="blue", alpha=0.5, 
-             label="Original", kde=False, stat="density", ax=axs[1])
-axs[0].set_xscale('log')
-
-
-axs[0].set_title(f"mass (assume. m_0 = 0) (MSE: {mse_per_feature[i]:.4f})")
-axs[0].legend()
-
-plt.tight_layout()
+fig = exploratory_energy_histograms(x_np, x_hat_np, mse_per_feature)
 wandb.run.log({"Evaluation/Log_Binned_Histograms": wandb.Image(fig)})
-
-plt.show()
+show_figure()
 
 
 # In[ ]:
 
 
-plt.close(fig)
+close_figure(fig)
 wandb.finish()
 os.system(f"python -m wandb sync --sync-all")
 
 
 # In[ ]:
-
-
 
 

@@ -1,4 +1,3 @@
-from line_profiler import profile
 import lightning as L
 import awkward as ak
 import numpy as np
@@ -10,8 +9,19 @@ import torch.nn.functional as F
 from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data import IterableDataset, DataLoader, get_worker_info
 
-# TODO: This is a bit farouche
-feature_cols = ["L1T_PUPPIPart_Eta", "L1T_PUPPIPart_Phi", "L1T_PUPPIPart_PT", "L1T_PUPPIPart_PID", "L1T_PUPPIPart_PuppiW"]
+PARTICLE_FEATURE_COLS = [
+    "L1T_PUPPIPart_Eta",
+    "L1T_PUPPIPart_Phi",
+    "L1T_PUPPIPart_PT",
+    "L1T_PUPPIPart_PID",
+    "L1T_PUPPIPart_PuppiW",
+]
+PARTICLE_SELECTED_FEATURES = ["L1T_PUPPIPart_Eta", "L1T_PUPPIPart_Phi", "L1T_PUPPIPart_PT"]
+JET_AK4_SELECTED_FEATURES = ["L1T_JetAK4_Eta", "L1T_JetAK4_Phi", "L1T_JetAK4_PT"]
+JET_AK8_SELECTED_FEATURES = ["L1T_JetAK8_Eta", "L1T_JetAK8_Phi", "L1T_JetAK8_PT"]
+
+# Backwards-compatible name used by older scripts.
+feature_cols = PARTICLE_FEATURE_COLS
 
 # For quantizing inputs
 class UniformQuantizerSTE(nn.Module):
@@ -32,8 +42,6 @@ class UniformQuantizerSTE(nn.Module):
             # e.g., 8-bit unsigned: 0 to 255
             self.q_min = 0
             self.q_max = (2 ** self.bit_depth) - 1
-
-    @profile
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # 1. Scale to the integer domain
         x_scaled = x / self.lsb
@@ -51,19 +59,24 @@ class UniformQuantizerSTE(nn.Module):
 
 class PreprocessTranformer:
     # TODO: Integrate the PUPPI_weight cut
-    # TODO: This is all hardcoded for now
-    def __init__(self, epsilon=1e-8):
+    def __init__(self, selected_features=None, epsilon=1e-8):
         self.epsilon = epsilon
-        self.col_name = "L1T_PUPPIPart_PT"
+        self.selected_features = selected_features or PARTICLE_SELECTED_FEATURES
+        self.eta_column = self._column_with_suffix("_Eta")
+        self.phi_column = self._column_with_suffix("_Phi")
+        self.pt_column = self._column_with_suffix("_PT")
+        self.col_name = self.pt_column
         # Find the integer index of the transformed column for tensor operations later
-        self.col_idx = feature_cols.index(self.col_name) if self.col_name else None
+        self.col_idx = self.selected_features.index(self.col_name) if self.col_name else None
+
+    def _column_with_suffix(self, suffix):
+        matches = [column for column in self.selected_features if column.endswith(suffix)]
+        return matches[0] if matches else None
 
     # TODO: trasnform to realistic bit depth.
     def truncate_quantize(self, df):
         # ..truncate an quantize the given features
         pass
-
-    @profile
     def forward_dataframe(self, df):
 
 
@@ -71,35 +84,34 @@ class PreprocessTranformer:
         #if self.col_name and self.col_name in df.columns:
 
         # Apply same transforms as OmniJet
-        df["L1T_PUPPIPart_PT"] = df["L1T_PUPPIPart_PT"].apply(
+        df[self.pt_column] = df[self.pt_column].apply(
                 lambda x: np.log(np.asarray(x) + self.epsilon) - 1.8
                 )
-        df["L1T_PUPPIPart_Phi"] = df["L1T_PUPPIPart_Phi"] / np.pi
-        df["L1T_PUPPIPart_Eta"] = df["L1T_PUPPIPart_Eta"] / 3
+        df[self.phi_column] = df[self.phi_column] / np.pi
+        df[self.eta_column] = df[self.eta_column] / 3
 
         return df
-
-    @profile
     def forward_awkward(self, array):
         """Applies the forward transform to an Awkward event array."""
-        array = ak.with_field(
-            array,
-            np.log(array["L1T_PUPPIPart_PT"] + self.epsilon) - 1.8,
-            "L1T_PUPPIPart_PT",
-        )
-        array = ak.with_field(
-            array,
-            array["L1T_PUPPIPart_Phi"] / np.pi,
-            "L1T_PUPPIPart_Phi",
-        )
-        array = ak.with_field(
-            array,
-            array["L1T_PUPPIPart_Eta"] / 3,
-            "L1T_PUPPIPart_Eta",
-        )
+        if self.pt_column is not None and self.pt_column in array.fields:
+            array = ak.with_field(
+                array,
+                np.log(array[self.pt_column] + self.epsilon) - 1.8,
+                self.pt_column,
+            )
+        if self.phi_column is not None and self.phi_column in array.fields:
+            array = ak.with_field(
+                array,
+                array[self.phi_column] / np.pi,
+                self.phi_column,
+            )
+        if self.eta_column is not None and self.eta_column in array.fields:
+            array = ak.with_field(
+                array,
+                array[self.eta_column] / 3,
+                self.eta_column,
+            )
         return array
-
-    @profile
     def inverse_tensor(self, tensor):
         """Applies the inverse transform to the PyTorch prediction tensor."""
         # Create a clone to avoid in-place modification issues during backprop
@@ -114,7 +126,6 @@ class PreprocessTranformer:
 
 
 class ParquetFeatureDataset(IterableDataset):
-    @profile
     def __init__(
         self,
         parquet_dirs,
@@ -124,6 +135,8 @@ class ParquetFeatureDataset(IterableDataset):
         batch_size=32,
         shuffle_row_groups=False,
         shuffle_seed=42,
+        mask_column="L1T_PUPPIPart_PuppiW",
+        mask_min_value=0.05,
     ):
         # We load the base dataset just to map the files
         self.dataset = ds.dataset(parquet_dirs, format="parquet")
@@ -131,15 +144,20 @@ class ParquetFeatureDataset(IterableDataset):
         for file_path in self.dataset.files:
             parquet_file = pq.ParquetFile(file_path)
             self.row_groups.extend((file_path, row_group_idx) for row_group_idx in range(parquet_file.num_row_groups))
-        self.features = features
-        self.selected_features = selected_features or ["L1T_PUPPIPart_Eta", "L1T_PUPPIPart_Phi", "L1T_PUPPIPart_PT"]
+        self.selected_features = selected_features or PARTICLE_SELECTED_FEATURES
+        if features is None:
+            self.features = list(self.selected_features)
+            if mask_column is not None:
+                self.features.append(mask_column)
+        else:
+            self.features = features
         self.max_particles = max_particles
         self.batch_size = batch_size
         self.shuffle_row_groups = shuffle_row_groups
         self.shuffle_seed = shuffle_seed
+        self.mask_column = mask_column
+        self.mask_min_value = mask_min_value
         self._iteration = 0
-
-    @profile
     def __iter__(self):
         # 1. GET WORKER INFO
         worker_info = get_worker_info()
@@ -163,7 +181,7 @@ class ParquetFeatureDataset(IterableDataset):
             if not row_groups:
                 return
 
-        transformer = PreprocessTranformer()
+        transformer = PreprocessTranformer(self.selected_features)
 
         # 3. READ WORKER-SPECIFIC ROW GROUPS
         for file_path, row_group_idx in row_groups:
@@ -179,9 +197,8 @@ class ParquetFeatureDataset(IterableDataset):
                 ak_batch = ak.from_arrow(batch)
                 ak_batch = transformer.forward_awkward(ak_batch)
 
-                puppi_cutoff = 0.05
-                if "L1T_PUPPIPart_PuppiW" in ak_batch.fields:
-                    particle_mask = ak_batch["L1T_PUPPIPart_PuppiW"] > puppi_cutoff
+                if self.mask_column is not None and self.mask_column in ak_batch.fields:
+                    particle_mask = ak_batch[self.mask_column] > self.mask_min_value
                 else:
                     particle_mask = ak.ones_like(ak_batch[self.selected_features[0]], dtype=bool)
 
@@ -227,21 +244,39 @@ class ParquetFeatureDataset(IterableDataset):
 
 
 class ParquetDataModule(L.LightningDataModule):
-    @profile
-    def __init__(self, parquet_dirs_train, parquet_dirs_val, parquet_dirs_test, features=feature_cols, selected_features=None, window_particles=256, batch_size=32, num_workers=0, shuffle_train=True, shuffle_seed=42):
+    def __init__(
+        self,
+        parquet_dirs_train,
+        parquet_dirs_val,
+        parquet_dirs_test,
+        features=feature_cols,
+        selected_features=None,
+        window_particles=256,
+        batch_size=32,
+        num_workers=0,
+        shuffle_train=True,
+        shuffle_seed=42,
+        mask_column="L1T_PUPPIPart_PuppiW",
+        mask_min_value=0.05,
+    ):
         super().__init__()
         self.parquet_dirs_train = parquet_dirs_train
         self.parquet_dirs_val = parquet_dirs_val
         self.parquet_dirs_test = parquet_dirs_test
-        self.features = features
-        self.selected_features = selected_features or ["L1T_PUPPIPart_Eta", "L1T_PUPPIPart_Phi", "L1T_PUPPIPart_PT"]
+        self.selected_features = selected_features or PARTICLE_SELECTED_FEATURES
+        if features is None:
+            self.features = list(self.selected_features)
+            if mask_column is not None:
+                self.features.append(mask_column)
+        else:
+            self.features = features
         self.window_particles = window_particles
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.shuffle_train = shuffle_train
         self.shuffle_seed = shuffle_seed
-
-    @profile
+        self.mask_column = mask_column
+        self.mask_min_value = mask_min_value
     def _make_loader(self, dataset, persistent_workers=True):
         kwargs = {
             "batch_size": None,
@@ -252,8 +287,6 @@ class ParquetDataModule(L.LightningDataModule):
         if self.num_workers > 0:
             kwargs["prefetch_factor"] = 4
         return DataLoader(dataset, **kwargs)
-
-    @profile
     def train_dataloader(self):
         dataset = ParquetFeatureDataset(
             self.parquet_dirs_train,
@@ -263,10 +296,10 @@ class ParquetDataModule(L.LightningDataModule):
             self.batch_size,
             shuffle_row_groups=self.shuffle_train,
             shuffle_seed=self.shuffle_seed,
+            mask_column=self.mask_column,
+            mask_min_value=self.mask_min_value,
         )
         return self._make_loader(dataset)
-
-    @profile
     def val_dataloader(self):
         dataset = ParquetFeatureDataset(
             self.parquet_dirs_val,
@@ -276,10 +309,10 @@ class ParquetDataModule(L.LightningDataModule):
             self.batch_size,
             shuffle_row_groups=False,
             shuffle_seed=self.shuffle_seed,
+            mask_column=self.mask_column,
+            mask_min_value=self.mask_min_value,
         )
         return self._make_loader(dataset)
-
-    @profile
     def test_dataloader(self):
         dataset = ParquetFeatureDataset(
             self.parquet_dirs_test,
@@ -289,6 +322,8 @@ class ParquetDataModule(L.LightningDataModule):
             self.batch_size,
             shuffle_row_groups=False,
             shuffle_seed=self.shuffle_seed,
+            mask_column=self.mask_column,
+            mask_min_value=self.mask_min_value,
         )
         # Test loaders generally shouldn't use persistent workers anyway, 
         # since they only run once at the very end.

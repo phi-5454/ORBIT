@@ -1,4 +1,3 @@
-from line_profiler import profile
 import torch
 import torch.nn as nn
 
@@ -16,6 +15,87 @@ class FSQ(nn.Module):
         # We skip the STE here and do it in the main LightningModule forward pass
         # for cleaner loss tracking.
         return z_rounded / half_l
+
+
+class _RotationTrick(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, z, z_q):
+        ctx.save_for_backward(z.detach(), z_q.detach())
+        return z_q
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        z, z_q = ctx.saved_tensors
+        eps = 1e-8
+
+        z_norm = z.norm(dim=-1, keepdim=True)
+        z_q_norm = z_q.norm(dim=-1, keepdim=True)
+        z_hat = z / z_norm.clamp(min=eps)
+        z_q_hat = z_q / z_q_norm.clamp(min=eps)
+
+        bisector = z_hat + z_q_hat
+        bisector_norm = bisector.norm(dim=-1, keepdim=True)
+        bisector_hat = bisector / bisector_norm.clamp(min=eps)
+
+        reflected = grad_output - 2 * (grad_output * z_q_hat).sum(dim=-1, keepdim=True) * z_q_hat
+        rotated = reflected - 2 * (reflected * bisector_hat).sum(dim=-1, keepdim=True) * bisector_hat
+        rotated = rotated * (z_q_norm / z_norm.clamp(min=eps))
+
+        valid = (z_norm > eps) & (z_q_norm > eps) & (bisector_norm > eps)
+        grad_z = torch.where(valid, rotated, grad_output)
+        return grad_z, None
+
+
+class VQQuantizer(nn.Module):
+    def __init__(
+        self,
+        feature_size,
+        num_codes,
+        beta=0.95,
+        gradient_estimator="ste",
+        kmeans_init=False,
+        sync_nu=0.0,
+    ):
+        super().__init__()
+        import sys
+        from pathlib import Path
+
+        try:
+            from vqtorch.nn import VectorQuant
+        except ModuleNotFoundError:
+            sys.path.append(str(Path(__file__).resolve().parent.parent / "vqtorch"))
+            from vqtorch.nn import VectorQuant
+
+        if feature_size <= 0:
+            raise ValueError("feature_size must be positive for VQQuantizer")
+        if num_codes <= 0:
+            raise ValueError("num_codes must be positive for VQQuantizer")
+        if gradient_estimator not in ("ste", "rotation_trick"):
+            raise ValueError(f"Unsupported VQ gradient estimator: {gradient_estimator}")
+
+        self.gradient_estimator = gradient_estimator
+        self.vq = VectorQuant(
+            feature_size=feature_size,
+            num_codes=num_codes,
+            beta=beta,
+            sync_nu=sync_nu,
+            kmeans_init=kmeans_init,
+            dim=-1,
+        )
+
+    def forward(self, z):
+        z_q_ste, vq_info = self.vq(z)
+
+        if self.gradient_estimator == "ste":
+            z_q = z_q_ste
+        else:
+            z_q = self.vq.to_original_format(
+                _RotationTrick.apply(vq_info["z"], vq_info["z_q"])
+            )
+
+        z_q_raw = self.vq.to_original_format(vq_info["z_q"])
+        codes = vq_info["q"].squeeze(-1)
+        return z_q, z_q_raw, codes, vq_info["loss"]
 
 
 class Phi(nn.Module):
@@ -224,7 +304,6 @@ class NormformerBlock(nn.Module):
         # A LayerNorm applied to the output of the MLP before the residual connection.
         self.ln_post_ff = nn.LayerNorm(d_model)
 
-    @profile
     def forward(self, x, mask=None, use_attention=True, return_diagnostics=False):
         # --- Self-Attention Block ---
         # Pre-norm

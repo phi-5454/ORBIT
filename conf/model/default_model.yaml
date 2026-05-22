@@ -4,11 +4,22 @@ lr: 1e-3
 hidden_dim: 64
 batch_size: 32
 latent_nodes: 32
+quantizer: "fsq" # Backward-compatible default for both branches: "fsq" or "vq"
+mu_quantizer: null # Optional branch override: "fsq" or "vq"
+alpha_quantizer: null # Optional branch override: "fsq" or "vq"
 fsq_mu_levels: [5, 4, 4, 3, 3, 3, 2, 2]
 #fsq_mu_levels: [64, 64, 64, 64, 32, 32, 32, 16, 16, 8, 8, 4, 4]
 fsq_alpha_levels: [1024]
 #fsq_alpha_levels: [8096]
 #fsq_alpha_levels: [65536]
+vq_mu_dim: 3
+vq_alpha_dim: 0
+vq_mu_num_codes: 1024
+vq_alpha_num_codes: 0
+vq_beta: 0.95
+vq_gradient_estimator: "ste" # "ste" or "rotation_trick"
+vq_kmeans_init: False
+vq_sync_nu: 0.0
 window_particles: 128
 #window_particles: 256
 #window_particles: 1024

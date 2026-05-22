@@ -21,3 +21,62 @@ num_dataload_workers: 0
 replot_only: False
 mode: "train" #or "test_only"
 ckpt_path: "./some_model.ckpt" # to load model from for test_only.
+
+data:
+  level: "particle" # "particle" or "jet"
+  particle:
+    features:
+      - "L1T_PUPPIPart_Eta"
+      - "L1T_PUPPIPart_Phi"
+      - "L1T_PUPPIPart_PT"
+      - "L1T_PUPPIPart_PID"
+      - "L1T_PUPPIPart_PuppiW"
+    selected_features:
+      - "L1T_PUPPIPart_Eta"
+      - "L1T_PUPPIPart_Phi"
+      - "L1T_PUPPIPart_PT"
+    mask_column: "L1T_PUPPIPart_PuppiW"
+    mask_min_value: 0.05
+  jet:
+    features:
+      - "L1T_JetAK4_Eta"
+      - "L1T_JetAK4_Phi"
+      - "L1T_JetAK4_PT"
+    selected_features:
+      - "L1T_JetAK4_Eta"
+      - "L1T_JetAK4_Phi"
+      - "L1T_JetAK4_PT"
+    mask_column: null
+    mask_min_value: 0.0
+
+multirun:
+  enabled: False
+  name: "codebook_size_scan"
+  suite_id: null
+  job_index: 0
+  job_count: 1
+  collect_only: False
+  seeds: [42]
+  y_metrics:
+    - "metrics/mse_Eta"
+    - "metrics/mse_Phi"
+    - "metrics/mse_pT"
+  codebook_configs:
+    - label: "fsq_10"
+      fsq_mu_levels: [10, 10, 10]
+      fsq_alpha_levels: []
+    - label: "fsq_15"
+      fsq_mu_levels: [15, 15, 15]
+      fsq_alpha_levels: []
+    - label: "fsq_21"
+      fsq_mu_levels: [21, 21, 21]
+      fsq_alpha_levels: []
+    - label: "fsq_25"
+      fsq_mu_levels: [25, 25, 25]
+      fsq_alpha_levels: []
+    - label: "fsq_35"
+      fsq_mu_levels: [35, 35, 35]
+      fsq_alpha_levels: []
+    - label: "fsq_42"
+      fsq_mu_levels: [42, 42, 42]
+      fsq_alpha_levels: []
