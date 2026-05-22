@@ -1,7 +1,8 @@
 # TODO: scheduling, optimization?
 
 lr: 1e-3
-hidden_dim: 64
+#hidden_dim: 64
+hidden_dim: 256
 batch_size: 32
 latent_nodes: 32
 quantizer: "fsq" # Backward-compatible default for both branches: "fsq" or "vq"
@@ -19,7 +20,10 @@ vq_alpha_num_codes: 0
 vq_beta: 0.95
 vq_gradient_estimator: "ste" # "ste" or "rotation_trick"
 vq_kmeans_init: False
-vq_sync_nu: 0.0
+vq_sync_nu: 2.0
+vq_affine_lr: 10.0
+vq_affine_groups: 1
+vq_commitment_update_frequency: 4
 window_particles: 128
 #window_particles: 256
 #window_particles: 1024
@@ -32,6 +36,9 @@ normformer_dropout: 0.1
 #weight_decay: 1e-4
 weight_decay: 1e-3
 commit_beta: 0.25
+beta_mu: 0.25
+beta_alpha: 1.0
+reconstruction_loss: "l1" # "l1" or "l2"
 skip_quantization: False
 use_attention: True
 diagnostic_max_events: 8

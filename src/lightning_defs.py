@@ -1,16 +1,16 @@
-import os
 import json
+import os
 
 import lightning as L
+import numpy as np
 import torch
 import torch.nn.functional as F
 from torch.optim.lr_scheduler import LinearLR
-import numpy as np
 
-from eval_metrics import PhysicsEvaluator
-from plotting import attention_delta_eta_phi_figure, attention_map_figure, close_figure
 import torch_modules as tm
 import wandb
+from eval_metrics import PhysicsEvaluator
+from plotting import attention_delta_eta_phi_figure, attention_map_figure, close_figure
 
 
 class PHA_FSQ_VAE(L.LightningModule):
@@ -27,7 +27,9 @@ class PHA_FSQ_VAE(L.LightningModule):
 
         default_quantizer = model_cfg.get("quantizer", "fsq")
         self.mu_quantizer_type = model_cfg.get("mu_quantizer") or default_quantizer
-        self.alpha_quantizer_type = model_cfg.get("alpha_quantizer") or default_quantizer
+        self.alpha_quantizer_type = (
+            model_cfg.get("alpha_quantizer") or default_quantizer
+        )
         self.quantizer_type = (
             self.mu_quantizer_type
             if self.mu_quantizer_type == self.alpha_quantizer_type
@@ -60,53 +62,75 @@ class PHA_FSQ_VAE(L.LightningModule):
         batch_size = model_cfg["batch_size"]
         window_particles = model_cfg["window_particles"]
 
-        self.example_input_array = (torch.randn(batch_size, window_particles, in_dim),
-                                    torch.ones(batch_size, window_particles, dtype=torch.bool)
+        self.example_input_array = (
+            torch.randn(batch_size, window_particles, in_dim),
+            torch.ones(batch_size, window_particles, dtype=torch.bool),
+        )
 
-                                    )
+        self.input_proj = tm.MLP(in_dim, hidden_dim, [2 * hidden_dim, 2 * hidden_dim])
+        self.latent_proj = tm.MLP(
+            hidden_dim, codebook_dim, [2 * hidden_dim, 2 * hidden_dim]
+        )
 
-        self.input_proj = tm.MLP(in_dim, hidden_dim, [2 * hidden_dim, 2*hidden_dim])
-        self.latent_proj = tm.MLP(hidden_dim, codebook_dim, [2 * hidden_dim, 2*hidden_dim])
+        self.latent_proj_out = tm.MLP(
+            codebook_dim, hidden_dim, [2 * hidden_dim, 2 * hidden_dim]
+        )
+        self.output_proj = tm.MLP(hidden_dim, in_dim, [2 * hidden_dim, 2 * hidden_dim])
 
-        self.latent_proj_out = tm.MLP(codebook_dim, hidden_dim, [2 * hidden_dim, 2*hidden_dim])
-        self.output_proj = tm.MLP(hidden_dim, in_dim, [2 * hidden_dim, 2*hidden_dim])
-
-        self.encoder = tm.NormformerEncoder(num_layers=num_enc_dec_layers, model_dim=hidden_dim, nhead=num_heads, mlp_expansion_factor=nf_mlp_expansion_factor, dropout=nf_dropout)
-        '''
+        self.encoder = tm.NormformerEncoder(
+            num_layers=num_enc_dec_layers,
+            model_dim=hidden_dim,
+            nhead=num_heads,
+            mlp_expansion_factor=nf_mlp_expansion_factor,
+            dropout=nf_dropout,
+        )
+        """
         self.encoder = tm.ParticleSetEncoder(
             in_channels=in_dim,
             hidden_dim=hidden_dim,
             latent_nodes=num_heads,
             out_channels=dim_quantized,
         )
-        '''
+        """
 
         # TODO: Rework phi
-        self.phi = tm.Phi(dim_in=hidden_dim, dim_alpha=self.dim_alpha, dim_mu=self.dim_mu)
+        self.phi = tm.Phi(
+            dim_in=hidden_dim, dim_alpha=self.dim_alpha, dim_mu=self.dim_mu
+        )
 
         self.quantizer_mu = self._build_branch_quantizer("mu", self.dim_mu)
         self.quantizer_alpha = self._build_branch_quantizer("alpha", self.dim_alpha)
 
         # TODO: Rework psi
-        self.psi = tm.Psi(dim_mu=self.dim_mu, dim_alpha=self.dim_alpha, dim_out=hidden_dim)
+        self.psi = tm.Psi(
+            dim_mu=self.dim_mu, dim_alpha=self.dim_alpha, dim_out=hidden_dim
+        )
 
-        '''
+        """
         self.decoder = tm.ParticleSetDecoder(
             latent_channels=codebook_dim,
             hidden_dim=hidden_dim,
             out_nodes=model_cfg["window_particles"],
             out_channels=in_dim,
         )
-        '''
-        self.decoder = tm.NormformerEncoder(num_layers=num_enc_dec_layers, model_dim=hidden_dim, nhead=num_heads, mlp_expansion_factor=nf_mlp_expansion_factor, dropout=nf_dropout)
+        """
+        self.decoder = tm.NormformerEncoder(
+            num_layers=num_enc_dec_layers,
+            model_dim=hidden_dim,
+            nhead=num_heads,
+            mlp_expansion_factor=nf_mlp_expansion_factor,
+            dropout=nf_dropout,
+        )
 
         self.evaluator = PhysicsEvaluator(data_level=self.data_level)
+
     def _branch_quantizer_type(self, branch):
         if branch == "mu":
             return self.mu_quantizer_type
         if branch == "alpha":
             return self.alpha_quantizer_type
         raise ValueError(f"Unknown quantizer branch: {branch}")
+
     def _branch_quantizer_shape(self, branch):
         quantizer_type = self._branch_quantizer_type(branch)
         if quantizer_type == "fsq":
@@ -114,9 +138,12 @@ class PHA_FSQ_VAE(L.LightningModule):
             return len(levels), np.prod(levels) if len(levels) > 0 else 1
         if quantizer_type == "vq":
             dim = int(self.model_cfg.get(f"vq_{branch}_dim", 0))
-            num_codes = int(self.model_cfg.get(f"vq_{branch}_num_codes", 1)) if dim > 0 else 1
+            num_codes = (
+                int(self.model_cfg.get(f"vq_{branch}_num_codes", 1)) if dim > 0 else 1
+            )
             return dim, num_codes
         raise ValueError(f"Unsupported {branch} quantizer: {quantizer_type}")
+
     def _build_branch_quantizer(self, branch, dim):
         if dim <= 0:
             return None
@@ -132,10 +159,14 @@ class PHA_FSQ_VAE(L.LightningModule):
                 gradient_estimator=self.model_cfg.get("vq_gradient_estimator", "ste"),
                 kmeans_init=bool(self.model_cfg.get("vq_kmeans_init", False)),
                 sync_nu=float(self.model_cfg.get("vq_sync_nu", 0.0)),
+                affine_lr=float(self.model_cfg.get("vq_affine_lr", 0.0)),
+                affine_groups=int(self.model_cfg.get("vq_affine_groups", 1)),
             )
         raise ValueError(f"Unsupported {branch} quantizer: {quantizer_type}")
+
     def _empty_quantizer_loss(self):
         return torch.zeros((), device=self.device)
+
     def _quantize_one(self, branch, quantizer, z, dim):
         if dim <= 0:
             return z, z, z, self._empty_quantizer_loss()
@@ -147,6 +178,7 @@ class PHA_FSQ_VAE(L.LightningModule):
 
         z_decoded, z_hat, codes, loss = quantizer(z)
         return z_decoded, z_hat, codes, loss
+
     def _quantize_latents(self, z_mu, z_alpha):
         z_dec_mu, z_hat_mu, z_track_mu, loss_mu = self._quantize_one(
             "mu",
@@ -160,14 +192,46 @@ class PHA_FSQ_VAE(L.LightningModule):
             z_alpha,
             self.dim_alpha,
         )
-        return z_dec_mu, z_dec_alpha, z_hat_mu, z_hat_alpha, z_track_mu, z_track_alpha, loss_mu, loss_alpha
+        return (
+            z_dec_mu,
+            z_dec_alpha,
+            z_hat_mu,
+            z_hat_alpha,
+            z_track_mu,
+            z_track_alpha,
+            loss_mu,
+            loss_alpha,
+        )
+
+    def _should_apply_vq_commitment_loss(self):
+        if not self.training:
+            return True
+        frequency = int(self.model_cfg.get("vq_commitment_update_frequency", 1))
+        if frequency <= 1:
+            return True
+        return int(getattr(self, "global_step", 0)) % frequency == 0
+
+    def _assemble_vq_loss(self, loss_parts, beta):
+        commitment = loss_parts["commitment"]
+        if not self._should_apply_vq_commitment_loss():
+            commitment = commitment.detach().new_zeros(())
+        return loss_parts["codebook"] + (beta * commitment)
+
     def _track_codebook(self, z_hat_mu, z_hat_alpha, mask, prefix="val"):
         """Extracts unique codes from the current batch and adds them to the global epoch sets."""
         # Route to the correct sets
         if prefix == "val":
-            set_mu, set_alpha, set_comb = self.val_used_codes_mu, self.val_used_codes_alpha, self.val_used_codes_combined
+            set_mu, set_alpha, set_comb = (
+                self.val_used_codes_mu,
+                self.val_used_codes_alpha,
+                self.val_used_codes_combined,
+            )
         else:
-            set_mu, set_alpha, set_comb = self.test_used_codes_mu, self.test_used_codes_alpha, self.test_used_codes_combined
+            set_mu, set_alpha, set_comb = (
+                self.test_used_codes_mu,
+                self.test_used_codes_alpha,
+                self.test_used_codes_combined,
+            )
 
         def add_unique_codes(codes, target_set):
             codes_valid = codes[mask]
@@ -201,40 +265,74 @@ class PHA_FSQ_VAE(L.LightningModule):
             uniq_combined = torch.unique(z_combined, dim=0).detach().cpu().numpy()
             for vec in np.round(uniq_combined, decimals=4):
                 set_comb.add(tuple(vec))
+
     def _log_and_clear_utilization(self, prefix="val"):
         """Calculates utilization percentages, logs them, and safely clears the sets."""
         if prefix == "val":
-            set_mu, set_alpha, set_comb = self.val_used_codes_mu, self.val_used_codes_alpha, self.val_used_codes_combined
+            set_mu, set_alpha, set_comb = (
+                self.val_used_codes_mu,
+                self.val_used_codes_alpha,
+                self.val_used_codes_combined,
+            )
         else:
-            set_mu, set_alpha, set_comb = self.test_used_codes_mu, self.test_used_codes_alpha, self.test_used_codes_combined
+            set_mu, set_alpha, set_comb = (
+                self.test_used_codes_mu,
+                self.test_used_codes_alpha,
+                self.test_used_codes_combined,
+            )
 
         if self.dim_mu > 0:
-            self.log(f"{prefix}_metrics/utilization_mu", len(set_mu) / self.total_codes_mu, sync_dist=True)
-            self.log(f"{prefix}_metrics/active_codes_mu", float(len(set_mu)), sync_dist=True)
+            self.log(
+                f"{prefix}_metrics/utilization_mu",
+                len(set_mu) / self.total_codes_mu,
+                sync_dist=True,
+            )
+            self.log(
+                f"{prefix}_metrics/active_codes_mu", float(len(set_mu)), sync_dist=True
+            )
             set_mu.clear()
 
         if self.dim_alpha > 0:
-            self.log(f"{prefix}_metrics/utilization_alpha", len(set_alpha) / self.total_codes_alpha, sync_dist=True)
-            self.log(f"{prefix}_metrics/active_codes_alpha", float(len(set_alpha)), sync_dist=True)
+            self.log(
+                f"{prefix}_metrics/utilization_alpha",
+                len(set_alpha) / self.total_codes_alpha,
+                sync_dist=True,
+            )
+            self.log(
+                f"{prefix}_metrics/active_codes_alpha",
+                float(len(set_alpha)),
+                sync_dist=True,
+            )
             set_alpha.clear()
 
         if self.dim_mu > 0 and self.dim_alpha > 0:
-            self.log(f"{prefix}_metrics/utilization_combined", len(set_comb) / self.total_codes_combined, sync_dist=True)
-            self.log(f"{prefix}_metrics/active_codes_combined", float(len(set_comb)), sync_dist=True)
+            self.log(
+                f"{prefix}_metrics/utilization_combined",
+                len(set_comb) / self.total_codes_combined,
+                sync_dist=True,
+            )
+            self.log(
+                f"{prefix}_metrics/active_codes_combined",
+                float(len(set_comb)),
+                sync_dist=True,
+            )
             set_comb.clear()
+
     def forward(self, x, mask):
         # 1. Encode
         x_proj = self.input_proj(x)
 
-        #if(not torch.isfinite(x_proj).all().item()):
-            #print("111_")
-        z_encoded = self.encoder(x_proj, mask, use_attention=self.model_cfg["use_attention"])
+        # if(not torch.isfinite(x_proj).all().item()):
+        # print("111_")
+        z_encoded = self.encoder(
+            x_proj, mask, use_attention=self.model_cfg["use_attention"]
+        )
 
         # 2. Split
         z_mu, z_alpha = self.phi(z_encoded)
 
         # 3. Quantize
-        if(self.model_cfg["skip_quantization"]==True):
+        if self.model_cfg["skip_quantization"] == True:
             z_track_mu = z_mu
             z_track_alpha = z_alpha
             z_decoded = self.psi(z_mu, z_alpha)
@@ -259,6 +357,7 @@ class PHA_FSQ_VAE(L.LightningModule):
         x_hat = self.output_proj(x_hat_lat)
 
         return x_hat, z_mu, z_track_mu, z_alpha, z_track_alpha
+
     def forward_with_diagnostics(self, x, mask):
         x_proj = self.input_proj(x)
         z_encoded, encoder_diags = self.encoder(
@@ -299,10 +398,17 @@ class PHA_FSQ_VAE(L.LightningModule):
         )
         x_hat = self.output_proj(x_hat_lat)
 
-        return x_hat, z_mu, z_track_mu, z_alpha, z_track_alpha, {
-            "encoder": encoder_diags,
-            "decoder": decoder_diags,
-        }
+        return (
+            x_hat,
+            z_mu,
+            z_track_mu,
+            z_alpha,
+            z_track_alpha,
+            {
+                "encoder": encoder_diags,
+                "decoder": decoder_diags,
+            },
+        )
 
     def _first_valid_indices(self, mask):
         has_valid = mask.any(dim=1)
@@ -333,10 +439,14 @@ class PHA_FSQ_VAE(L.LightningModule):
 
             row_sums = masked_weights.sum(dim=-1).clamp(min=1e-12)
             probs = masked_weights / row_sums.unsqueeze(-1)
-            entropy = -(probs.clamp(min=1e-12) * probs.clamp(min=1e-12).log()).sum(dim=-1)
+            entropy = -(probs.clamp(min=1e-12) * probs.clamp(min=1e-12).log()).sum(
+                dim=-1
+            )
             n_keys = valid.sum(dim=1).clamp(min=2).float()
             normalized_entropy = entropy / n_keys.log()[:, None, None]
-            query_values = normalized_entropy[valid[:, None, :].expand_as(normalized_entropy)]
+            query_values = normalized_entropy[
+                valid[:, None, :].expand_as(normalized_entropy)
+            ]
 
             max_mass = probs.max(dim=-1).values
             max_values = max_mass[valid[:, None, :].expand_as(max_mass)]
@@ -348,21 +458,43 @@ class PHA_FSQ_VAE(L.LightningModule):
                 attn_norm = attn_delta.detach()[token_mask.expand_as(attn_delta)].norm()
                 ff_norm = ff_delta.detach()[token_mask.expand_as(ff_delta)].norm()
                 stats[f"{prefix}/layer_{layer_idx}_attn_to_ff_delta_norm"] = (
-                    attn_norm / ff_norm.clamp(min=1e-12)
-                ).detach().cpu()
+                    (attn_norm / ff_norm.clamp(min=1e-12)).detach().cpu()
+                )
 
-            stats[f"{prefix}/layer_{layer_idx}_diag_attention_mass"] = diag_mass.detach().cpu()
-            stats[f"{prefix}/layer_{layer_idx}_offdiag_attention_mass"] = (1.0 - diag_mass).detach().cpu()
-            stats[f"{prefix}/layer_{layer_idx}_max_attention_mass"] = max_values.mean().detach().cpu()
-            stats[f"{prefix}/layer_{layer_idx}_normalized_attention_entropy"] = query_values.mean().detach().cpu()
-            stats[f"{prefix}/layer_{layer_idx}_valid_pair_count"] = denom.detach().float().cpu()
+            stats[f"{prefix}/layer_{layer_idx}_diag_attention_mass"] = (
+                diag_mass.detach().cpu()
+            )
+            stats[f"{prefix}/layer_{layer_idx}_offdiag_attention_mass"] = (
+                (1.0 - diag_mass).detach().cpu()
+            )
+            stats[f"{prefix}/layer_{layer_idx}_max_attention_mass"] = (
+                max_values.mean().detach().cpu()
+            )
+            stats[f"{prefix}/layer_{layer_idx}_normalized_attention_entropy"] = (
+                query_values.mean().detach().cpu()
+            )
+            stats[f"{prefix}/layer_{layer_idx}_valid_pair_count"] = (
+                denom.detach().float().cpu()
+            )
 
             if layer_idx in (0, len(diagnostics) - 1):
-                first_event = int(valid.any(dim=1).nonzero(as_tuple=False)[0].item()) if valid.any() else 0
+                first_event = (
+                    int(valid.any(dim=1).nonzero(as_tuple=False)[0].item())
+                    if valid.any()
+                    else 0
+                )
                 n_valid = int(valid[first_event].sum().item())
                 if n_valid > 1:
-                    matrix = weights[first_event, :, :n_valid, :n_valid].mean(dim=0).detach().cpu().numpy()
-                    fig = attention_map_figure(matrix, f"{prefix} layer {layer_idx} attention")
+                    matrix = (
+                        weights[first_event, :, :n_valid, :n_valid]
+                        .mean(dim=0)
+                        .detach()
+                        .cpu()
+                        .numpy()
+                    )
+                    fig = attention_map_figure(
+                        matrix, f"{prefix} layer {layer_idx} attention"
+                    )
                     figures[f"{prefix}/layer_{layer_idx}_attention_map"] = fig
 
                     if x is not None and x.shape[-1] >= 2:
@@ -373,7 +505,9 @@ class PHA_FSQ_VAE(L.LightningModule):
                             f"{prefix} layer {layer_idx} attention vs delta eta/phi",
                         )
                         if delta_fig is not None:
-                            figures[f"{prefix}/layer_{layer_idx}_delta_eta_phi_attention"] = delta_fig
+                            figures[
+                                f"{prefix}/layer_{layer_idx}_delta_eta_phi_attention"
+                            ] = delta_fig
 
                         offdiag_delta_fig = attention_delta_eta_phi_figure(
                             weights,
@@ -383,9 +517,12 @@ class PHA_FSQ_VAE(L.LightningModule):
                             exclude_self=True,
                         )
                         if offdiag_delta_fig is not None:
-                            figures[f"{prefix}/layer_{layer_idx}_delta_eta_phi_attention_no_self"] = offdiag_delta_fig
+                            figures[
+                                f"{prefix}/layer_{layer_idx}_delta_eta_phi_attention_no_self"
+                            ] = offdiag_delta_fig
 
         return stats, figures
+
     def _build_context_probes(self, x, mask):
         target_idx, has_valid = self._first_valid_indices(mask)
         batch_idx = torch.arange(x.shape[0], device=x.device)
@@ -400,7 +537,15 @@ class PHA_FSQ_VAE(L.LightningModule):
         swapped_x[batch_idx, target_idx] = x[batch_idx, target_idx]
         swapped_mask[batch_idx, target_idx] = has_valid
 
-        return target_idx, has_valid, self_only_x, self_only_mask, swapped_x, swapped_mask
+        return (
+            target_idx,
+            has_valid,
+            self_only_x,
+            self_only_mask,
+            swapped_x,
+            swapped_mask,
+        )
+
     def _collect_correlation_diagnostics(self, x, mask):
         max_events = int(self.model_cfg.get("diagnostic_max_events", 8))
         x = x[:max_events]
@@ -409,7 +554,14 @@ class PHA_FSQ_VAE(L.LightningModule):
         with torch.no_grad():
             x_hat, _, _, _, _, diagnostics = self.forward_with_diagnostics(x, mask)
 
-            target_idx, has_valid, self_only_x, self_only_mask, swapped_x, swapped_mask = self._build_context_probes(x, mask)
+            (
+                target_idx,
+                has_valid,
+                self_only_x,
+                self_only_mask,
+                swapped_x,
+                swapped_mask,
+            ) = self._build_context_probes(x, mask)
             batch_idx = torch.arange(x.shape[0], device=x.device)
 
             self_only_x_hat = self(self_only_x, self_only_mask)[0]
@@ -420,23 +572,43 @@ class PHA_FSQ_VAE(L.LightningModule):
             target_swapped = swapped_x_hat[batch_idx, target_idx][has_valid]
 
             stats = {
-                "context/self_only_target_l1": F.l1_loss(target_orig, target_self_only).detach().cpu(),
-                "context/self_only_target_l2": F.mse_loss(target_orig, target_self_only).detach().cpu(),
-                "context/swapped_context_target_l1": F.l1_loss(target_orig, target_swapped).detach().cpu(),
-                "context/swapped_context_target_l2": F.mse_loss(target_orig, target_swapped).detach().cpu(),
+                "context/self_only_target_l1": F.l1_loss(target_orig, target_self_only)
+                .detach()
+                .cpu(),
+                "context/self_only_target_l2": F.mse_loss(target_orig, target_self_only)
+                .detach()
+                .cpu(),
+                "context/swapped_context_target_l1": F.l1_loss(
+                    target_orig, target_swapped
+                )
+                .detach()
+                .cpu(),
+                "context/swapped_context_target_l2": F.mse_loss(
+                    target_orig, target_swapped
+                )
+                .detach()
+                .cpu(),
             }
 
-            perm = torch.stack([torch.randperm(x.shape[1], device=x.device) for _ in range(x.shape[0])])
+            perm = torch.stack(
+                [torch.randperm(x.shape[1], device=x.device) for _ in range(x.shape[0])]
+            )
             inv_perm = torch.argsort(perm, dim=1)
             gather_idx = perm[:, :, None].expand(-1, -1, x.shape[-1])
             x_perm = torch.gather(x, 1, gather_idx)
             mask_perm = torch.gather(mask, 1, perm)
             x_hat_perm = self(x_perm, mask_perm)[0]
-            x_hat_unpermuted = torch.gather(x_hat_perm, 1, inv_perm[:, :, None].expand(-1, -1, x.shape[-1]))
-            stats["context/permutation_equivariance_l1"] = F.l1_loss(
-                x_hat[mask],
-                x_hat_unpermuted[mask],
-            ).detach().cpu()
+            x_hat_unpermuted = torch.gather(
+                x_hat_perm, 1, inv_perm[:, :, None].expand(-1, -1, x.shape[-1])
+            )
+            stats["context/permutation_equivariance_l1"] = (
+                F.l1_loss(
+                    x_hat[mask],
+                    x_hat_unpermuted[mask],
+                )
+                .detach()
+                .cpu()
+            )
 
             figures = {}
             for block_name in ("encoder", "decoder"):
@@ -450,6 +622,7 @@ class PHA_FSQ_VAE(L.LightningModule):
                 figures.update(block_figures)
 
         return stats, figures
+
     def _log_correlation_diagnostics(self):
         diagnostics = self.val_correlation_diagnostics
         self.val_correlation_diagnostics = None
@@ -468,7 +641,10 @@ class PHA_FSQ_VAE(L.LightningModule):
             return
 
         if isinstance(self.logger, L.pytorch.loggers.WandbLogger):
-            payload = {f"val_diagnostics/{key}": wandb.Image(fig) for key, fig in figures.items()}
+            payload = {
+                f"val_diagnostics/{key}": wandb.Image(fig)
+                for key, fig in figures.items()
+            }
             if payload:
                 self.logger.experiment.log(payload, step=self.global_step)
         else:
@@ -476,10 +652,16 @@ class PHA_FSQ_VAE(L.LightningModule):
             os.makedirs(save_dir, exist_ok=True)
             for key, fig in figures.items():
                 clean_key = key.replace("/", "_")
-                fig.savefig(os.path.join(save_dir, f"val_diagnostics_{clean_key}_step_{self.global_step}.png"))
+                fig.savefig(
+                    os.path.join(
+                        save_dir,
+                        f"val_diagnostics_{clean_key}_step_{self.global_step}.png",
+                    )
+                )
 
         for fig in figures.values():
             close_figure(fig)
+
     def configure_optimizers(self):
         # Tip: AdamW (with weight decay) is vastly superior to Adam for Transformers
         optimizer = torch.optim.AdamW(
@@ -505,46 +687,101 @@ class PHA_FSQ_VAE(L.LightningModule):
                 "frequency": 1,
             },
         }
-    def compute_losses(self, x, mask, beta=0.25, phi_idx=1):
-            """
-            Calculates losses while respecting the periodicity of the phi angle.
-            Assuming x shape is [Batch, Particles, Features] and phi is at phi_idx.
-            """
-            x_hat, z_mu, z_hat_mu, z_alpha, z_hat_alpha = self(x, mask)
-            
-            mask_3d = mask.unsqueeze(-1).expand_as(x)
 
-            # 1. Calculate the raw difference
-            diff = x_hat - x
+    def compute_losses(self, x, mask, beta=None, phi_idx=1):
+        """
+        Calculates losses while respecting the periodicity of the phi angle.
+        Assuming x shape is [Batch, Particles, Features] and phi is at phi_idx.
+        """
+        x_hat, z_mu, z_hat_mu, z_alpha, z_hat_alpha = self(x, mask)
 
-            # 2. Wrap the periodic feature phi. Here, rescaled to [-1, 1] 
-            # CRITICAL: We use .clone() here before slice assignment to prevent 
-            # PyTorch from throwing an "in-place operation" Autograd error!
-            diff_wrapped = diff.clone()
-            diff_wrapped[..., phi_idx] = (diff[..., phi_idx] + 1) % (2 * 1) - 1
+        mask_3d = mask.unsqueeze(-1).expand_as(x)
 
-            # 3. Calculate the actual feature losses using the wrapped difference
-            loss_abs_full = torch.abs(diff_wrapped)
-            loss_l2_full = diff_wrapped ** 2  # Equivalent to F.mse_loss under the hood
+        # 1. Calculate the raw difference
+        diff = x_hat - x
 
-            # 4. Apply the mask and mean (unchanged from your original code)
-            loss_abs = (loss_abs_full * mask_3d).sum() / mask_3d.sum().clamp(min=1.0)
-            loss_l2 = (loss_l2_full * mask_3d).sum() / mask_3d.sum().clamp(min=1.0)
+        # 2. Wrap the periodic feature phi. Here, rescaled to [-1, 1]
+        # CRITICAL: We use .clone() here before slice assignment to prevent
+        # PyTorch from throwing an "in-place operation" Autograd error!
+        diff_wrapped = diff.clone()
+        diff_wrapped[..., phi_idx] = (diff[..., phi_idx] + 1) % (2 * 1) - 1
 
-            if self.mu_quantizer_type == "vq":
-                loss_commitment = self._last_quantizer_loss_mu if self.dim_mu > 0 else 0
-            else:
-                loss_commitment = F.mse_loss(z_mu, z_hat_mu.detach()) if self.dim_mu > 0 else 0
+        # 3. Calculate diagnostic reconstruction losses using the wrapped difference
+        loss_abs_full = torch.abs(diff_wrapped)
+        loss_l2_full = diff_wrapped**2  # Equivalent to F.mse_loss under the hood
 
-            if self.alpha_quantizer_type == "vq":
-                loss_amplitude = self._last_quantizer_loss_alpha if self.dim_alpha > 0 else 0
-            else:
-                loss_amplitude = F.mse_loss(z_alpha, z_hat_alpha.detach()) if self.dim_alpha > 0 else 0
+        # 4. Apply the mask and mean
+        loss_abs = (loss_abs_full * mask_3d).sum() / mask_3d.sum().clamp(min=1.0)
+        loss_l2 = (loss_l2_full * mask_3d).sum() / mask_3d.sum().clamp(min=1.0)
+        loss_l2_distance = (diff_wrapped.norm(dim=-1) * mask).sum() / mask.sum().clamp(
+            min=1.0
+        )
 
-            # 6. Total loss
-            loss_pha = loss_abs + (beta * loss_commitment) + loss_amplitude
+        reconstruction_loss_name = self.model_cfg.get("reconstruction_loss", "l1")
+        if reconstruction_loss_name == "l1":
+            reconstruction_loss = loss_abs
+        elif reconstruction_loss_name in ("l2", "euclidean"):
+            reconstruction_loss = loss_l2_distance
+        else:
+            raise ValueError(
+                f"Unsupported reconstruction_loss: {reconstruction_loss_name}"
+            )
 
-            return loss_pha, loss_l2, loss_abs, loss_commitment, loss_amplitude, x_hat, z_hat_mu, z_hat_alpha
+        if self.mu_quantizer_type == "vq":
+            loss_commitment = self._last_quantizer_loss_mu if self.dim_mu > 0 else 0
+        else:
+            loss_commitment = (
+                F.mse_loss(z_mu, z_hat_mu.detach()) if self.dim_mu > 0 else 0
+            )
+
+        if self.alpha_quantizer_type == "vq":
+            loss_amplitude = (
+                self._last_quantizer_loss_alpha if self.dim_alpha > 0 else 0
+            )
+        else:
+            loss_amplitude = (
+                F.mse_loss(z_alpha, z_hat_alpha.detach()) if self.dim_alpha > 0 else 0
+            )
+
+        beta_mu = float(
+            self.model_cfg.get(
+                "beta_mu",
+                self.model_cfg.get(
+                    "mu_quant_loss_scale",
+                    self.model_cfg.get("commit_beta", 0.25) if beta is None else beta,
+                ),
+            )
+        )
+        beta_alpha = float(
+            self.model_cfg.get(
+                "beta_alpha",
+                self.model_cfg.get("alpha_quant_loss_scale", 1.0),
+            )
+        )
+
+        if self.mu_quantizer_type == "vq" and self.dim_mu > 0:
+            loss_commitment = self._assemble_vq_loss(loss_commitment, beta_mu)
+        else:
+            loss_commitment = beta_mu * loss_commitment
+
+        if self.alpha_quantizer_type == "vq" and self.dim_alpha > 0:
+            loss_amplitude = self._assemble_vq_loss(loss_amplitude, beta_alpha)
+        else:
+            loss_amplitude = beta_alpha * loss_amplitude
+
+        loss_pha = reconstruction_loss + loss_commitment + loss_amplitude
+
+        return (
+            loss_pha,
+            loss_l2,
+            loss_abs,
+            loss_commitment,
+            loss_amplitude,
+            x_hat,
+            z_hat_mu,
+            z_hat_alpha,
+        )
+
     def _evaluate_and_log(self, sample_tuple, prefix="val"):
         """Handles evaluator routing for both validation and testing."""
         if sample_tuple is None:
@@ -570,7 +807,7 @@ class PHA_FSQ_VAE(L.LightningModule):
                 if isinstance(self.logger, L.pytorch.loggers.WandbLogger):
                     self.logger.experiment.log(
                         {f"{prefix}_plots/{key}": wandb.Image(fig)},
-                        #step=self.global_step,
+                        # step=self.global_step,
                     )
 
                 elif isinstance(self.logger, L.pytorch.loggers.TensorBoardLogger):
@@ -578,13 +815,15 @@ class PHA_FSQ_VAE(L.LightningModule):
                         f"{prefix}_plots/{key}", fig, global_step=self.global_step
                     )
                 else:
-                    os.makedirs(self.output_dir + "/" +"local_debug_plots", exist_ok=True)
+                    os.makedirs(
+                        self.output_dir + "/" + "local_debug_plots", exist_ok=True
+                    )
                     fig.savefig(
                         f"local_debug_plots/{prefix}_{key.replace('/', '_')}_step_{self.global_step}.png"
                     )
 
                 close_figure(fig)
-                
+
             # 3. Route Raw Data (NumPy Arrays for Histograms)
             elif isinstance(value, np.ndarray):
                 # Strip the "histograms/" prefix so the internal file keys are clean
@@ -597,18 +836,18 @@ class PHA_FSQ_VAE(L.LightningModule):
         if histograms_to_save:
             save_dir = self.output_dir + "/" + "saved_histograms"
             os.makedirs(save_dir, exist_ok=True)
-            
+
             # Format: saved_histograms/val_hists_step_15000.npz
             filepath = f"{save_dir}/{prefix}_hists_step_{self.global_step}.npz"
-            
+
             # Save all arrays into a single compressed binary file
             np.savez_compressed(filepath, **histograms_to_save)
-            
+
             # Optional but highly recommended: Backup the raw data to WandB!
             if isinstance(self.logger, L.pytorch.loggers.WandbLogger):
                 artifact = wandb.Artifact(
-                    name=f"{prefix}_histograms_step_{self.global_step}", 
-                    type="histogram_data"
+                    name=f"{prefix}_histograms_step_{self.global_step}",
+                    type="histogram_data",
                 )
                 artifact.add_file(filepath)
                 self.logger.experiment.log_artifact(artifact)
@@ -619,6 +858,7 @@ class PHA_FSQ_VAE(L.LightningModule):
             filepath = f"{save_dir}/{prefix}_metrics_step_{self.global_step}.json"
             with open(filepath, "w") as f:
                 json.dump(metrics_to_save, f, indent=2, sort_keys=True)
+
     '''
     def on_fit_start(self) -> None:
         super().on_fit_start()
@@ -631,14 +871,15 @@ class PHA_FSQ_VAE(L.LightningModule):
             return
 
     '''
+
     def training_step(self, batch, batch_idx):
         # WELD: Unpack the yielded tuple
         x, mask = batch
 
         # Forward Pass
         # x_hat, z_mu, z_hat_mu, z_alpha, z_hat_alpha = self(x, mask)
-        loss_pha, loss_l2, loss_abs, loss_commit, loss_amp, _, _, _ = self.compute_losses(
-            x, mask, beta=0.25
+        loss_pha, loss_l2, loss_abs, loss_commit, loss_amp, _, _, _ = (
+            self.compute_losses(x, mask)
         )
 
         # TODO: Make the increment only for the first epoch
@@ -649,8 +890,9 @@ class PHA_FSQ_VAE(L.LightningModule):
                 "train_loss": loss_pha,
                 "mse_loss": loss_l2,
                 "l1_recon": loss_abs,
-                "commit_mu": loss_commit,
-                "commit_alpha": loss_amp,
+                "task_recon": loss_pha - loss_commit - loss_amp,
+                "quant_loss_mu": loss_commit,
+                "quant_loss_alpha": loss_amp,
             },
             prog_bar=True,
             on_step=True,
@@ -665,11 +907,19 @@ class PHA_FSQ_VAE(L.LightningModule):
         )
 
         return loss_pha
+
     def validation_step(self, batch, batch_idx):
         x, mask = batch
-        loss_pha, loss_l2, loss_abs, loss_commit, loss_amp, x_hat, z_hat_mu, z_hat_alpha = self.compute_losses(
-            x, mask, beta=self.hparams.model_cfg["commit_beta"]
-        )
+        (
+            loss_pha,
+            loss_l2,
+            loss_abs,
+            loss_commit,
+            loss_amp,
+            x_hat,
+            z_hat_mu,
+            z_hat_alpha,
+        ) = self.compute_losses(x, mask)
 
         # Track the codebook usage for this batch
         self._track_codebook(z_hat_mu, z_hat_alpha, mask, prefix="val")
@@ -679,21 +929,36 @@ class PHA_FSQ_VAE(L.LightningModule):
                 "val_loss": loss_pha,
                 "val_mse_loss": loss_l2,
                 "val_l1_recon": loss_abs,
-                "val_commit_mu": loss_commit,
-                "val_commit_alpha": loss_amp,
+                "val_task_recon": loss_pha - loss_commit - loss_amp,
+                "val_quant_loss_mu": loss_commit,
+                "val_quant_loss_alpha": loss_amp,
             },
-            prog_bar=True, sync_dist=True,
+            prog_bar=True,
+            sync_dist=True,
         )
 
         if batch_idx == 0:
             self.val_sample = (x.detach(), x_hat.detach(), mask.detach())
-            if not self.trainer.sanity_checking and self.val_correlation_diagnostics is None:
-                self.val_correlation_diagnostics = self._collect_correlation_diagnostics(x.detach(), mask.detach())
+            if (
+                not self.trainer.sanity_checking
+                and self.val_correlation_diagnostics is None
+            ):
+                self.val_correlation_diagnostics = (
+                    self._collect_correlation_diagnostics(x.detach(), mask.detach())
+                )
+
     def test_step(self, batch, batch_idx):
         x, mask = batch
-        loss_pha, loss_l2, loss_abs, loss_commit, loss_amp, x_hat, z_hat_mu, z_hat_alpha = self.compute_losses(
-            x, mask, beta=0.25
-        )
+        (
+            loss_pha,
+            loss_l2,
+            loss_abs,
+            loss_commit,
+            loss_amp,
+            x_hat,
+            z_hat_mu,
+            z_hat_alpha,
+        ) = self.compute_losses(x, mask)
 
         # Track the codebook usage for this batch
         self._track_codebook(z_hat_mu, z_hat_alpha, mask, prefix="test")
@@ -703,41 +968,47 @@ class PHA_FSQ_VAE(L.LightningModule):
                 "test_loss": loss_pha,
                 "test_mse_loss": loss_l2,
                 "test_l1_recon": loss_abs,
-                "test_commit_mu": loss_commit,
-                "test_commit_alpha": loss_amp,
+                "test_task_recon": loss_pha - loss_commit - loss_amp,
+                "test_quant_loss_mu": loss_commit,
+                "test_quant_loss_alpha": loss_amp,
             },
-            prog_bar=True, sync_dist=True,
+            prog_bar=True,
+            sync_dist=True,
         )
 
-        self.test_step_outputs.append({
-            "x": x.detach().cpu(),
-            "x_hat": x_hat.detach().cpu(),
-            "mask": mask.detach().cpu()
-        })
+        self.test_step_outputs.append(
+            {
+                "x": x.detach().cpu(),
+                "x_hat": x_hat.detach().cpu(),
+                "mask": mask.detach().cpu(),
+            }
+        )
+
     def on_validation_epoch_end(self):
         if self.trainer.sanity_checking:
             return
 
         # 1. Evaluate Physics
         self._evaluate_and_log(getattr(self, "val_sample", None), prefix="val")
-        
+
         # 2. Log and clear codebook utilization
         self._log_and_clear_utilization(prefix="val")
 
         # 3. Log particle-correlation diagnostics
         self._log_correlation_diagnostics()
+
     def on_test_epoch_end(self):
         # 1. Reconstruct giant tensor block
         x_all = torch.cat([b["x"] for b in self.test_step_outputs], dim=0)
         x_hat_all = torch.cat([b["x_hat"] for b in self.test_step_outputs], dim=0)
         mask_all = torch.cat([b["mask"] for b in self.test_step_outputs], dim=0)
-        
+
         # 2. Evaluate Physics
         giant_tuple = (x_all, x_hat_all, mask_all)
         self._evaluate_and_log(giant_tuple, prefix="test")
-        
+
         # 3. Log and clear codebook utilization
         self._log_and_clear_utilization(prefix="test")
-        
+
         # 4. Clear memory
         self.test_step_outputs.clear()

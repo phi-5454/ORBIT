@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 class FSQ(nn.Module):
     def __init__(self, levels: list[int]):
@@ -55,6 +56,8 @@ class VQQuantizer(nn.Module):
         gradient_estimator="ste",
         kmeans_init=False,
         sync_nu=0.0,
+        affine_lr=0.0,
+        affine_groups=1,
     ):
         super().__init__()
         import sys
@@ -80,6 +83,8 @@ class VQQuantizer(nn.Module):
             beta=beta,
             sync_nu=sync_nu,
             kmeans_init=kmeans_init,
+            affine_lr=affine_lr,
+            affine_groups=affine_groups,
             dim=-1,
         )
 
@@ -95,7 +100,11 @@ class VQQuantizer(nn.Module):
 
         z_q_raw = self.vq.to_original_format(vq_info["z_q"])
         codes = vq_info["q"].squeeze(-1)
-        return z_q, z_q_raw, codes, vq_info["loss"]
+        losses = {
+            "commitment": F.mse_loss(vq_info["z"], vq_info["z_q"].detach()),
+            "codebook": F.mse_loss(vq_info["z"].detach(), vq_info["z_q"]),
+        }
+        return z_q, z_q_raw, codes, losses
 
 
 class Phi(nn.Module):

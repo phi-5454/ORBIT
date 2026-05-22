@@ -80,3 +80,69 @@ multirun:
     - label: "fsq_42"
       fsq_mu_levels: [42, 42, 42]
       fsq_alpha_levels: []
+    - label: "vq_256_ste"
+      quantizer: "vq"
+      mu_quantizer: "vq"
+      alpha_quantizer: "vq"
+      fsq_mu_levels: []
+      fsq_alpha_levels: []
+      vq_mu_dim: 3
+      vq_alpha_dim: 0
+      vq_mu_num_codes: 256
+      vq_alpha_num_codes: 0
+      vq_gradient_estimator: "ste"
+    - label: "vq_512_ste"
+      quantizer: "vq"
+      mu_quantizer: "vq"
+      alpha_quantizer: "vq"
+      fsq_mu_levels: []
+      fsq_alpha_levels: []
+      vq_mu_dim: 3
+      vq_alpha_dim: 0
+      vq_mu_num_codes: 512
+      vq_alpha_num_codes: 0
+      vq_gradient_estimator: "ste"
+    - label: "vq_1024_ste"
+      quantizer: "vq"
+      mu_quantizer: "vq"
+      alpha_quantizer: "vq"
+      fsq_mu_levels: []
+      fsq_alpha_levels: []
+      vq_mu_dim: 3
+      vq_alpha_dim: 0
+      vq_mu_num_codes: 1024
+      vq_alpha_num_codes: 0
+      vq_gradient_estimator: "ste"
+    - label: "vq_256_rotation"
+      quantizer: "vq"
+      mu_quantizer: "vq"
+      alpha_quantizer: "vq"
+      fsq_mu_levels: []
+      fsq_alpha_levels: []
+      vq_mu_dim: 3
+      vq_alpha_dim: 0
+      vq_mu_num_codes: 256
+      vq_alpha_num_codes: 0
+      vq_gradient_estimator: "rotation_trick"
+    - label: "vq_512_rotation"
+      quantizer: "vq"
+      mu_quantizer: "vq"
+      alpha_quantizer: "vq"
+      fsq_mu_levels: []
+      fsq_alpha_levels: []
+      vq_mu_dim: 3
+      vq_alpha_dim: 0
+      vq_mu_num_codes: 512
+      vq_alpha_num_codes: 0
+      vq_gradient_estimator: "rotation_trick"
+    - label: "vq_1024_rotation"
+      quantizer: "vq"
+      mu_quantizer: "vq"
+      alpha_quantizer: "vq"
+      fsq_mu_levels: []
+      fsq_alpha_levels: []
+      vq_mu_dim: 3
+      vq_alpha_dim: 0
+      vq_mu_num_codes: 1024
+      vq_alpha_num_codes: 0
+      vq_gradient_estimator: "rotation_trick"
