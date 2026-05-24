@@ -31,7 +31,9 @@ vq_kmeans_init: False
 vq_sync_nu: 2.0
 vq_affine_lr: 10.0
 vq_affine_groups: 1
+vq_replace_freq: 0
 vq_commitment_update_frequency: 4
+vq_loss_mode: "split" # "split" or "vqtorch"
 window_particles: 128
 #window_particles: 256
 #window_particles: 1024

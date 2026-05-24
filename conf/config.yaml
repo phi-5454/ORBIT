@@ -98,6 +98,16 @@ multirun:
       vq_mu_num_codes: 256
       vq_alpha_num_codes: 0
       vq_gradient_estimator: "ste"
+      reconstruction_loss: "mse"
+      beta_mu: 10.0
+      beta_alpha: 10.0
+      vq_beta: 0.9
+      vq_loss_mode: "vqtorch"
+      vq_sync_nu: 1.0
+      vq_affine_lr: 10.0
+      vq_affine_groups: 1
+      vq_replace_freq: 10
+      vq_commitment_update_frequency: 1
     - label: "vq_512_ste"
       quantizer: "vq"
       mu_quantizer: "vq"
@@ -109,6 +119,16 @@ multirun:
       vq_mu_num_codes: 512
       vq_alpha_num_codes: 0
       vq_gradient_estimator: "ste"
+      reconstruction_loss: "mse"
+      beta_mu: 10.0
+      beta_alpha: 10.0
+      vq_beta: 0.9
+      vq_loss_mode: "vqtorch"
+      vq_sync_nu: 1.0
+      vq_affine_lr: 10.0
+      vq_affine_groups: 1
+      vq_replace_freq: 10
+      vq_commitment_update_frequency: 1
     - label: "vq_512_ste_mlp"
       quantizer: "vq"
       mu_quantizer: "vq"
@@ -121,6 +141,16 @@ multirun:
       vq_alpha_num_codes: 0
       vq_gradient_estimator: "ste"
       use_attention: False
+      reconstruction_loss: "mse"
+      beta_mu: 10.0
+      beta_alpha: 10.0
+      vq_beta: 0.9
+      vq_loss_mode: "vqtorch"
+      vq_sync_nu: 1.0
+      vq_affine_lr: 10.0
+      vq_affine_groups: 1
+      vq_replace_freq: 10
+      vq_commitment_update_frequency: 1
     - label: "vq_1024_ste"
       quantizer: "vq"
       mu_quantizer: "vq"
@@ -132,6 +162,16 @@ multirun:
       vq_mu_num_codes: 1024
       vq_alpha_num_codes: 0
       vq_gradient_estimator: "ste"
+      reconstruction_loss: "mse"
+      beta_mu: 10.0
+      beta_alpha: 10.0
+      vq_beta: 0.9
+      vq_loss_mode: "vqtorch"
+      vq_sync_nu: 1.0
+      vq_affine_lr: 10.0
+      vq_affine_groups: 1
+      vq_replace_freq: 10
+      vq_commitment_update_frequency: 1
     - label: "vq_256_rotation"
       quantizer: "vq"
       mu_quantizer: "vq"
@@ -143,6 +183,16 @@ multirun:
       vq_mu_num_codes: 256
       vq_alpha_num_codes: 0
       vq_gradient_estimator: "rotation_trick"
+      reconstruction_loss: "mse"
+      beta_mu: 10.0
+      beta_alpha: 10.0
+      vq_beta: 0.9
+      vq_loss_mode: "vqtorch"
+      vq_sync_nu: 1.0
+      vq_affine_lr: 10.0
+      vq_affine_groups: 1
+      vq_replace_freq: 10
+      vq_commitment_update_frequency: 1
     - label: "vq_512_rotation"
       quantizer: "vq"
       mu_quantizer: "vq"
@@ -154,6 +204,16 @@ multirun:
       vq_mu_num_codes: 512
       vq_alpha_num_codes: 0
       vq_gradient_estimator: "rotation_trick"
+      reconstruction_loss: "mse"
+      beta_mu: 10.0
+      beta_alpha: 10.0
+      vq_beta: 0.9
+      vq_loss_mode: "vqtorch"
+      vq_sync_nu: 1.0
+      vq_affine_lr: 10.0
+      vq_affine_groups: 1
+      vq_replace_freq: 10
+      vq_commitment_update_frequency: 1
     - label: "vq_1024_rotation"
       quantizer: "vq"
       mu_quantizer: "vq"
@@ -165,3 +225,13 @@ multirun:
       vq_mu_num_codes: 1024
       vq_alpha_num_codes: 0
       vq_gradient_estimator: "rotation_trick"
+      reconstruction_loss: "mse"
+      beta_mu: 10.0
+      beta_alpha: 10.0
+      vq_beta: 0.9
+      vq_loss_mode: "vqtorch"
+      vq_sync_nu: 1.0
+      vq_affine_lr: 10.0
+      vq_affine_groups: 1
+      vq_replace_freq: 10
+      vq_commitment_update_frequency: 1

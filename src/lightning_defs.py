@@ -184,6 +184,7 @@ class PHA_FSQ_VAE(L.LightningModule):
                 sync_nu=float(self.model_cfg.get("vq_sync_nu", 0.0)),
                 affine_lr=float(self.model_cfg.get("vq_affine_lr", 0.0)),
                 affine_groups=int(self.model_cfg.get("vq_affine_groups", 1)),
+                replace_freq=int(self.model_cfg.get("vq_replace_freq", 0)),
             )
         raise ValueError(f"Unsupported {branch} quantizer: {quantizer_type}")
 
@@ -235,6 +236,9 @@ class PHA_FSQ_VAE(L.LightningModule):
         return int(getattr(self, "global_step", 0)) % frequency == 0
 
     def _assemble_vq_loss(self, loss_parts, beta):
+        if self.model_cfg.get("vq_loss_mode", "split") == "vqtorch":
+            return beta * loss_parts["vqtorch"]
+
         commitment = loss_parts["commitment"]
         if not self._should_apply_vq_commitment_loss():
             commitment = commitment.detach().new_zeros(())
@@ -799,6 +803,8 @@ class PHA_FSQ_VAE(L.LightningModule):
         reconstruction_loss_name = self.model_cfg.get("reconstruction_loss", "l1")
         if reconstruction_loss_name == "l1":
             reconstruction_loss = loss_abs
+        elif reconstruction_loss_name == "mse":
+            reconstruction_loss = loss_l2
         elif reconstruction_loss_name in ("l2", "euclidean"):
             reconstruction_loss = loss_l2_distance
         else:

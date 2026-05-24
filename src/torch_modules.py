@@ -58,6 +58,7 @@ class VQQuantizer(nn.Module):
         sync_nu=0.0,
         affine_lr=0.0,
         affine_groups=1,
+        replace_freq=0,
     ):
         super().__init__()
         import sys
@@ -84,6 +85,7 @@ class VQQuantizer(nn.Module):
             kmeans_init=kmeans_init,
             affine_lr=affine_lr,
             affine_groups=affine_groups,
+            replace_freq=replace_freq,
             dim=-1,
         )
 
@@ -102,6 +104,7 @@ class VQQuantizer(nn.Module):
         losses = {
             "commitment": F.mse_loss(vq_info["z"], vq_info["z_q"].detach()),
             "codebook": F.mse_loss(vq_info["z"].detach(), vq_info["z_q"]),
+            "vqtorch": vq_info["loss"],
         }
         return z_q, z_q_raw, codes, losses
 
