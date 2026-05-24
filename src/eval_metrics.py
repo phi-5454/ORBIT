@@ -134,18 +134,14 @@ class PhysicsEvaluator:
                     {
                         "initializer": _init_jet_reco_worker,
                         "initargs": (0.8, 0.0),
-                        "mp_context": mp.get_context(
-                            self.jet_metric_start_method
-                        ),
+                        "mp_context": mp.get_context(self.jet_metric_start_method),
                     }
-            )
+                )
 
             t0 = time.perf_counter()
             with executor_cls(**executor_kwargs) as executor:
                 t0 = _profile_eval("eval jet metric pool start", t0)
-                for result in executor.map(
-                    _particle_jet_metrics_one_event, event_args
-                ):
+                for result in executor.map(_particle_jet_metrics_one_event, event_args):
                     (
                         ev_true_jet_pts,
                         ev_reco_jet_pts,
