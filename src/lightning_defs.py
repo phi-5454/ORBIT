@@ -1,5 +1,6 @@
 import json
 import os
+import time
 
 import lightning as L
 import numpy as np
@@ -14,7 +15,15 @@ from plotting import attention_delta_eta_phi_figure, attention_map_figure, close
 
 
 class PHA_FSQ_VAE(L.LightningModule):
-    def __init__(self, model_cfg, output_dir, data_level="particle"):
+    def __init__(
+        self,
+        model_cfg,
+        output_dir,
+        data_level="particle",
+        jet_metric_workers=0,
+        jet_metric_backend="process",
+        jet_metric_start_method="forkserver",
+    ):
         super().__init__()
         self.model_cfg = model_cfg
         self.output_dir = output_dir
@@ -122,7 +131,21 @@ class PHA_FSQ_VAE(L.LightningModule):
             dropout=nf_dropout,
         )
 
-        self.evaluator = PhysicsEvaluator(data_level=self.data_level)
+        self.evaluator = PhysicsEvaluator(
+            data_level=self.data_level,
+            jet_metric_workers=jet_metric_workers,
+            jet_metric_backend=jet_metric_backend,
+            jet_metric_start_method=jet_metric_start_method,
+        )
+
+    def _timing_enabled(self):
+        return os.environ.get("ORBIT_PROFILE_EVAL", "0") == "1"
+
+    def _timing_log(self, label, start_time):
+        if self._timing_enabled() and self.trainer.is_global_zero:
+            elapsed = time.perf_counter() - start_time
+            print(f"[ORBIT_PROFILE_EVAL] {label}: {elapsed:.3f}s", flush=True)
+        return time.perf_counter()
 
     def _branch_quantizer_type(self, branch):
         if branch == "mu":
@@ -844,7 +867,9 @@ class PHA_FSQ_VAE(L.LightningModule):
             return
 
         x, x_hat, mask = sample_tuple
+        t0 = time.perf_counter()
         results = self.evaluator.evaluate_reconstruction(x, x_hat, mask)
+        t0 = self._timing_log(f"{prefix} evaluate_reconstruction", t0)
 
         # Initialize a dictionary to catch all the raw histogram arrays
         histograms_to_save = {}
@@ -886,6 +911,8 @@ class PHA_FSQ_VAE(L.LightningModule):
                 clean_key = key.replace("histograms/", "").replace("/", "_")
                 histograms_to_save[clean_key] = value
 
+        t0 = self._timing_log(f"{prefix} route/log results", t0)
+
         # ==========================================
         # 4. Save the collected histograms to disk
         # ==========================================
@@ -908,12 +935,16 @@ class PHA_FSQ_VAE(L.LightningModule):
                 artifact.add_file(filepath)
                 self.logger.experiment.log_artifact(artifact)
 
+        t0 = self._timing_log(f"{prefix} save/log histograms", t0)
+
         if metrics_to_save:
             save_dir = self.output_dir + "/" + "saved_metrics"
             os.makedirs(save_dir, exist_ok=True)
             filepath = f"{save_dir}/{prefix}_metrics_step_{self.global_step}.json"
             with open(filepath, "w") as f:
                 json.dump(metrics_to_save, f, indent=2, sort_keys=True)
+
+        self._timing_log(f"{prefix} save metrics", t0)
 
     '''
     def on_fit_start(self) -> None:
@@ -1054,17 +1085,22 @@ class PHA_FSQ_VAE(L.LightningModule):
         self._log_correlation_diagnostics()
 
     def on_test_epoch_end(self):
+        t0 = time.perf_counter()
         # 1. Reconstruct giant tensor block
         x_all = torch.cat([b["x"] for b in self.test_step_outputs], dim=0)
         x_hat_all = torch.cat([b["x_hat"] for b in self.test_step_outputs], dim=0)
         mask_all = torch.cat([b["mask"] for b in self.test_step_outputs], dim=0)
+        t0 = self._timing_log("test concatenate outputs", t0)
 
         # 2. Evaluate Physics
         giant_tuple = (x_all, x_hat_all, mask_all)
         self._evaluate_and_log(giant_tuple, prefix="test")
+        t0 = self._timing_log("test evaluate/log total", t0)
 
         # 3. Log and clear codebook utilization
         self._log_and_clear_utilization(prefix="test")
+        t0 = self._timing_log("test codebook utilization", t0)
 
         # 4. Clear memory
         self.test_step_outputs.clear()
+        self._timing_log("test clear outputs", t0)
