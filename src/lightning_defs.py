@@ -5,7 +5,7 @@ import lightning as L
 import numpy as np
 import torch
 import torch.nn.functional as F
-from torch.optim.lr_scheduler import LinearLR
+from torch.optim.lr_scheduler import LambdaLR
 
 import torch_modules as tm
 import wandb
@@ -663,30 +663,86 @@ class PHA_FSQ_VAE(L.LightningModule):
             close_figure(fig)
 
     def configure_optimizers(self):
-        # Tip: AdamW (with weight decay) is vastly superior to Adam for Transformers
+        schedule_cfg = self._lr_schedule_config()
         optimizer = torch.optim.AdamW(
             self.parameters(),
-            lr=self.hparams.model_cfg["lr"],
+            lr=schedule_cfg["max_lr"],
             weight_decay=self.hparams.model_cfg["weight_decay"],
         )
 
-        # Warmup Phase:
-        # Start at 1% of the base LR (0.01 * 1e-3 = 1e-5)
-        # Linearly increase to 100% of the base LR over the first 1,000 batches
-        warmup_scheduler = LinearLR(
-            optimizer, start_factor=0.01, end_factor=1.0, total_iters=1000
+        scheduler = LambdaLR(
+            optimizer,
+            lr_lambda=lambda epoch: self._lr_at_epoch(epoch, schedule_cfg)
+            / schedule_cfg["max_lr"],
         )
-
-        # Lightning requires a specific dictionary format if you want the
-        # scheduler to update every batch ("step") instead of every epoch.
         return {
             "optimizer": optimizer,
             "lr_scheduler": {
-                "scheduler": warmup_scheduler,
-                "interval": "step",  # CRITICAL: Updates every batch
+                "scheduler": scheduler,
+                "interval": "epoch",
                 "frequency": 1,
             },
         }
+
+    def _lr_schedule_config(self):
+        model_cfg = self.hparams.model_cfg
+        if model_cfg.get("use_attention", True):
+            prefix = "transformer"
+        else:
+            prefix = "deepsets"
+
+        try:
+            total_epochs = int(getattr(self.trainer, "max_epochs", 0) or 0)
+        except RuntimeError:
+            total_epochs = 0
+
+        return {
+            "initial_lr": float(model_cfg[f"{prefix}_initial_lr"]),
+            "max_lr": float(model_cfg[f"{prefix}_max_lr"]),
+            "final_lr": float(model_cfg[f"{prefix}_final_lr"]),
+            "warmup_epochs": int(model_cfg.get("lr_warmup_epochs", 4)),
+            "decay_to_initial_epochs": int(
+                model_cfg.get("lr_decay_to_initial_epochs", 20)
+            ),
+            "total_epochs": total_epochs,
+        }
+
+    @staticmethod
+    def _linear_interp(start, end, position, span):
+        if span <= 0:
+            return end
+        fraction = min(max(position / span, 0.0), 1.0)
+        return start + fraction * (end - start)
+
+    def _lr_at_epoch(self, epoch, schedule_cfg):
+        warmup_epochs = schedule_cfg["warmup_epochs"]
+        decay_to_initial_epochs = schedule_cfg["decay_to_initial_epochs"]
+        total_epochs = max(
+            schedule_cfg["total_epochs"], warmup_epochs + decay_to_initial_epochs + 1
+        )
+
+        initial_lr = schedule_cfg["initial_lr"]
+        max_lr = schedule_cfg["max_lr"]
+        final_lr = schedule_cfg["final_lr"]
+
+        if epoch < warmup_epochs:
+            return self._linear_interp(initial_lr, max_lr, epoch, max(warmup_epochs - 1, 1))
+
+        initial_decay_end = warmup_epochs + decay_to_initial_epochs
+        if epoch < initial_decay_end:
+            return self._linear_interp(
+                max_lr,
+                initial_lr,
+                epoch - warmup_epochs + 1,
+                decay_to_initial_epochs,
+            )
+
+        return self._linear_interp(
+            initial_lr,
+            final_lr,
+            epoch - initial_decay_end + 1,
+            max(total_epochs - initial_decay_end, 1),
+        )
 
     def compute_losses(self, x, mask, beta=None, phi_idx=1):
         """

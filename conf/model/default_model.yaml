@@ -1,6 +1,14 @@
 # TODO: scheduling, optimization?
 
 lr: 1e-3
+deepsets_initial_lr: 0.002
+deepsets_max_lr: 0.005
+deepsets_final_lr: 0.001
+transformer_initial_lr: 0.0005
+transformer_max_lr: 0.001
+transformer_final_lr: 0.0003
+lr_warmup_epochs: 4
+lr_decay_to_initial_epochs: 20
 #hidden_dim: 64
 hidden_dim: 128
 batch_size: 32
@@ -33,8 +41,7 @@ num_heads: 8
 num_enc_dec_layers: 4
 normformer_mlp_expansion_factor: 4
 normformer_dropout: 0.1
-#weight_decay: 1e-4
-weight_decay: 1e-3
+weight_decay: 0.01
 commit_beta: 0.25
 beta_mu: 0.25
 beta_alpha: 1.0
