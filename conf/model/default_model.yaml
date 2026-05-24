@@ -4,7 +4,7 @@ lr: 1e-3
 deepsets_initial_lr: 0.002
 deepsets_max_lr: 0.005
 deepsets_final_lr: 0.001
-transformer_initial_lr: 0.0005
+transformer_initial_lr: 0.0001
 transformer_max_lr: 0.001
 transformer_final_lr: 0.0003
 lr_warmup_epochs: 4

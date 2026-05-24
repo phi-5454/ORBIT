@@ -735,10 +735,11 @@ class PHA_FSQ_VAE(L.LightningModule):
         }
 
     @staticmethod
-    def _linear_interp(start, end, position, span):
+    def _smooth_interp(start, end, position, span):
         if span <= 0:
             return end
         fraction = min(max(position / span, 0.0), 1.0)
+        fraction = 0.5 - 0.5 * np.cos(np.pi * fraction)
         return start + fraction * (end - start)
 
     def _lr_at_epoch(self, epoch, schedule_cfg):
@@ -752,22 +753,27 @@ class PHA_FSQ_VAE(L.LightningModule):
         max_lr = schedule_cfg["max_lr"]
         final_lr = schedule_cfg["final_lr"]
 
-        if epoch < warmup_epochs:
-            return self._linear_interp(initial_lr, max_lr, epoch, max(warmup_epochs - 1, 1))
-
-        initial_decay_end = warmup_epochs + decay_to_initial_epochs
-        if epoch < initial_decay_end:
-            return self._linear_interp(
-                max_lr,
+        if epoch <= warmup_epochs:
+            return self._smooth_interp(
                 initial_lr,
-                epoch - warmup_epochs + 1,
-                decay_to_initial_epochs,
+                max_lr,
+                epoch,
+                max(warmup_epochs, 1),
             )
 
-        return self._linear_interp(
+        initial_decay_end = warmup_epochs + decay_to_initial_epochs
+        if epoch <= initial_decay_end:
+            return self._smooth_interp(
+                max_lr,
+                initial_lr,
+                epoch - warmup_epochs,
+                max(decay_to_initial_epochs, 1),
+            )
+
+        return self._smooth_interp(
             initial_lr,
             final_lr,
-            epoch - initial_decay_end + 1,
+            epoch - initial_decay_end,
             max(total_epochs - initial_decay_end, 1),
         )
 
