@@ -359,8 +359,11 @@ def plot_codebook_error_scatter(records, y_metrics, output_dir):
 
     for metric_idx, metric in enumerate(y_metrics):
         metric_records = [
-            record for record in records
-            if record.get(metric) is not None and record.get("total_codebook_size") is not None
+            record
+            for record in records
+            if record.get(metric) is not None
+            and record.get("total_codebook_size") is not None
+            and record[metric] > 0
         ]
         if not metric_records:
             continue
@@ -377,36 +380,8 @@ def plot_codebook_error_scatter(records, y_metrics, output_dir):
                 label=record.get("label", record.get("run_name", f"run_{i}")),
             )
 
-        grouped = {}
-        for record in metric_records:
-            grouped.setdefault(record["total_codebook_size"], []).append(record[metric])
-
-        x_mean = []
-        y_mean = []
-        y_std = []
-        for codebook_size in sorted(grouped):
-            values = np.array(grouped[codebook_size], dtype=float)
-            if len(values) <= 1:
-                continue
-            x_mean.append(codebook_size)
-            y_mean.append(values.mean())
-            y_std.append(values.std(ddof=1))
-
-        if x_mean:
-            ax.errorbar(
-                x_mean,
-                y_mean,
-                yerr=y_std,
-                fmt="o",
-                color="black",
-                ecolor="black",
-                elinewidth=1.5,
-                capsize=4,
-                markersize=5,
-                label="mean +/- std",
-            )
-
         ax.set_xscale("log")
+        ax.set_yscale("log")
         ax.set_xlabel("Total codebook size")
         ax.set_ylabel(metric.replace("metrics/", ""))
         ax.set_title(f"Codebook size vs. {metric.replace('metrics/', '')}")
