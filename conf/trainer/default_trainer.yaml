@@ -1,6 +1,6 @@
 fast_dev_run: False
 default_root_dir: ${output_dir}
-max_epochs: 10
+max_epochs: 30
 check_val_every_n_epoch: 1
 accelerator: "auto"
 gradient_clip_val: 1.0
