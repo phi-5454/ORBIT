@@ -12,8 +12,12 @@ import matplotlib.pyplot as plt
 import numpy as np
 import wandb
 
-from plotting import plot_codebook_error_scatter, replot_jet_structure
-from train_eval import TrainPipeline
+try:
+    from .plotting import plot_codebook_error_scatter, replot_jet_structure
+    from .train_eval import TrainPipeline
+except ImportError:
+    from plotting import plot_codebook_error_scatter, replot_jet_structure
+    from train_eval import TrainPipeline
 
 
 def _safe_name(value):

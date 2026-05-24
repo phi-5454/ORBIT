@@ -36,9 +36,14 @@ from dotenv import load_dotenv
 from omegaconf import DictConfig, OmegaConf
 
 import wandb
-from multirun import run_codebook_multirun
-from plotting import replot_jet_structure
-from train_eval import TrainPipeline
+try:
+    from .multirun import run_codebook_multirun
+    from .plotting import replot_jet_structure
+    from .train_eval import TrainPipeline
+except ImportError:
+    from multirun import run_codebook_multirun
+    from plotting import replot_jet_structure
+    from train_eval import TrainPipeline
 import datetime
 import uuid
 

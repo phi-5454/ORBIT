@@ -7,9 +7,14 @@ import numpy as np
 from pytorch_lightning.callbacks import LearningRateMonitor
 
 import wandb
-from data_loading import ParquetDataModule, feature_cols
-from lightning_defs import PHA_FSQ_VAE
-from torch_modules import *
+try:
+    from .data_loading import ParquetDataModule, feature_cols
+    from .lightning_defs import PHA_FSQ_VAE
+    from .torch_modules import *
+except ImportError:
+    from data_loading import ParquetDataModule, feature_cols
+    from lightning_defs import PHA_FSQ_VAE
+    from torch_modules import *
 from lightning.pytorch.callbacks import ModelSummary
 
 def make_run_name(base_name=None):
