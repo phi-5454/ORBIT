@@ -1,3 +1,7 @@
+import os
+import sys
+import traceback
+
 import lightning as L
 import awkward as ak
 import numpy as np
@@ -22,6 +26,22 @@ JET_AK8_SELECTED_FEATURES = ["L1T_JetAK8_Eta", "L1T_JetAK8_Phi", "L1T_JetAK8_PT"
 
 # Backwards-compatible name used by older scripts.
 feature_cols = PARTICLE_FEATURE_COLS
+
+
+def _log_dataloader_worker_exception(message):
+    worker_info = get_worker_info()
+    if worker_info is None:
+        worker = "main"
+    else:
+        worker = f"{worker_info.id}/{worker_info.num_workers}"
+
+    print(
+        f"[ORBIT_DATALOADER_WORKER_ERROR] pid={os.getpid()} worker={worker} {message}",
+        file=sys.stderr,
+        flush=True,
+    )
+    traceback.print_exc(file=sys.stderr)
+    sys.stderr.flush()
 
 # For quantizing inputs
 class UniformQuantizerSTE(nn.Module):
@@ -160,87 +180,104 @@ class ParquetFeatureDataset(IterableDataset):
         self._iteration = 0
     def __iter__(self):
         # 1. GET WORKER INFO
-        worker_info = get_worker_info()
-        row_groups = list(self.row_groups)
-        if self.shuffle_row_groups:
-            seed = self.shuffle_seed + self._iteration
-            rng = np.random.default_rng(seed)
-            rng.shuffle(row_groups)
-            self._iteration += 1
+        try:
+            worker_info = get_worker_info()
+            row_groups = list(self.row_groups)
+            if self.shuffle_row_groups:
+                seed = self.shuffle_seed + self._iteration
+                rng = np.random.default_rng(seed)
+                rng.shuffle(row_groups)
+                self._iteration += 1
 
-        # 2. SHARD ROW GROUPS ACROSS WORKERS
-        if worker_info is not None:
-            worker_id = worker_info.id
-            num_workers = worker_info.num_workers
-            
-            # Slice row groups, not files. A cluster job often trains from one
-            # large parquet file, where file-level sharding leaves workers idle.
-            row_groups = row_groups[worker_id::num_workers]
-            
-            # Edge case: If there are more workers than row groups, some workers get nothing
-            if not row_groups:
-                return
+            # 2. SHARD ROW GROUPS ACROSS WORKERS
+            if worker_info is not None:
+                worker_id = worker_info.id
+                num_workers = worker_info.num_workers
+                
+                # Slice row groups, not files. A cluster job often trains from one
+                # large parquet file, where file-level sharding leaves workers idle.
+                row_groups = row_groups[worker_id::num_workers]
+                
+                # Edge case: If there are more workers than row groups, some workers get nothing
+                if not row_groups:
+                    return
 
-        transformer = PreprocessTranformer(self.selected_features)
+            transformer = PreprocessTranformer(self.selected_features)
+        except Exception:
+            _log_dataloader_worker_exception(
+                "failed during dataset iteration setup"
+            )
+            raise
 
         # 3. READ WORKER-SPECIFIC ROW GROUPS
         for file_path, row_group_idx in row_groups:
-            parquet_file = pq.ParquetFile(file_path)
-            batches = parquet_file.iter_batches(
-                row_groups=[row_group_idx],
-                columns=self.features,
-                batch_size=self.batch_size,
-                use_threads=True,
-            )
-
-            for batch in batches:
-                ak_batch = ak.from_arrow(batch)
-                ak_batch = transformer.forward_awkward(ak_batch)
-
-                if self.mask_column is not None and self.mask_column in ak_batch.fields:
-                    particle_mask = ak_batch[self.mask_column] > self.mask_min_value
-                else:
-                    particle_mask = ak.ones_like(ak_batch[self.selected_features[0]], dtype=bool)
-
-                selected_arrays = [
-                    ak_batch[field][particle_mask][:, :, np.newaxis]
-                    for field in self.selected_features
-                ]
-                stacked = ak.concatenate(selected_arrays, axis=-1)
-
-                event_lengths = ak.num(stacked, axis=1)
-                non_empty_events = event_lengths > 0
-                if not ak.any(non_empty_events):
-                    continue
-
-                stacked = stacked[non_empty_events]
-                event_lengths = event_lengths[non_empty_events]
-
-                padded = ak.pad_none(
-                    stacked,
-                    self.max_particles,
-                    axis=1,
-                    clip=True,
+            batch_idx = None
+            try:
+                parquet_file = pq.ParquetFile(file_path)
+                batches = parquet_file.iter_batches(
+                    row_groups=[row_group_idx],
+                    columns=self.features,
+                    batch_size=self.batch_size,
+                    use_threads=True,
                 )
-                filled = ak.fill_none(
-                    padded,
-                    [0.0] * len(self.selected_features),
-                    axis=1,
+
+                for batch_idx, batch in enumerate(batches):
+                    ak_batch = ak.from_arrow(batch)
+                    ak_batch = transformer.forward_awkward(ak_batch)
+
+                    if self.mask_column is not None and self.mask_column in ak_batch.fields:
+                        particle_mask = ak_batch[self.mask_column] > self.mask_min_value
+                    else:
+                        particle_mask = ak.ones_like(ak_batch[self.selected_features[0]], dtype=bool)
+
+                    selected_arrays = [
+                        ak_batch[field][particle_mask][:, :, np.newaxis]
+                        for field in self.selected_features
+                    ]
+                    stacked = ak.concatenate(selected_arrays, axis=-1)
+
+                    event_lengths = ak.num(stacked, axis=1)
+                    non_empty_events = event_lengths > 0
+                    if not ak.any(non_empty_events):
+                        continue
+
+                    stacked = stacked[non_empty_events]
+                    event_lengths = event_lengths[non_empty_events]
+
+                    padded = ak.pad_none(
+                        stacked,
+                        self.max_particles,
+                        axis=1,
+                        clip=True,
+                    )
+                    filled = ak.fill_none(
+                        padded,
+                        [0.0] * len(self.selected_features),
+                        axis=1,
+                    )
+                    np_batch = ak.to_numpy(filled).astype(np.float32, copy=False)
+                    padded_events = torch.from_numpy(np_batch)
+
+                    lengths_np = np.minimum(
+                        ak.to_numpy(event_lengths),
+                        self.max_particles,
+                    ).astype(np.int64, copy=False)
+                    lengths = torch.from_numpy(lengths_np)
+                    mask = torch.arange(
+                        self.max_particles,
+                        dtype=torch.long,
+                    ).unsqueeze(0) < lengths.unsqueeze(1)
+
+                    yield padded_events, mask
+            except Exception:
+                _log_dataloader_worker_exception(
+                    "failed while reading parquet "
+                    f"file={file_path!r} row_group={row_group_idx} "
+                    f"columns={self.features!r} selected_features={self.selected_features!r} "
+                    f"batch_size={self.batch_size} max_particles={self.max_particles} "
+                    f"last_batch_idx={batch_idx}"
                 )
-                np_batch = ak.to_numpy(filled).astype(np.float32, copy=False)
-                padded_events = torch.from_numpy(np_batch)
-
-                lengths_np = np.minimum(
-                    ak.to_numpy(event_lengths),
-                    self.max_particles,
-                ).astype(np.int64, copy=False)
-                lengths = torch.from_numpy(lengths_np)
-                mask = torch.arange(
-                    self.max_particles,
-                    dtype=torch.long,
-                ).unsqueeze(0) < lengths.unsqueeze(1)
-
-                yield padded_events, mask
+                raise
 
 
 class ParquetDataModule(L.LightningDataModule):
