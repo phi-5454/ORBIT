@@ -71,6 +71,10 @@ multirun:
     - label: "fsq_21"
       fsq_mu_levels: [21, 21, 21]
       fsq_alpha_levels: []
+    - label: "fsq_21_mlp"
+      fsq_mu_levels: [21, 21, 21]
+      fsq_alpha_levels: []
+      use_attention: False
     - label: "fsq_25"
       fsq_mu_levels: [25, 25, 25]
       fsq_alpha_levels: []
@@ -102,6 +106,18 @@ multirun:
       vq_mu_num_codes: 512
       vq_alpha_num_codes: 0
       vq_gradient_estimator: "ste"
+    - label: "vq_512_ste_mlp"
+      quantizer: "vq"
+      mu_quantizer: "vq"
+      alpha_quantizer: "vq"
+      fsq_mu_levels: []
+      fsq_alpha_levels: []
+      vq_mu_dim: 4
+      vq_alpha_dim: 0
+      vq_mu_num_codes: 512
+      vq_alpha_num_codes: 0
+      vq_gradient_estimator: "ste"
+      use_attention: False
     - label: "vq_1024_ste"
       quantizer: "vq"
       mu_quantizer: "vq"
