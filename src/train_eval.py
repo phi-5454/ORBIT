@@ -117,7 +117,7 @@ class TrainPipeline:
             output_dir=output_dir,
             data_level=self.config.get("data", {}).get("level", "particle"),
             jet_metric_workers=self.config.get("num_eval_workers", 0),
-            jet_metric_backend=self.config.get("eval_worker_backend", "process"),
+            jet_metric_backend=self.config.get("eval_worker_backend", "thread"),
             jet_metric_start_method=self.config.get(
                 "eval_worker_start_method", "forkserver"
             ),

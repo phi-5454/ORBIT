@@ -1,4 +1,3 @@
-import logging
 import multiprocessing as mp
 import os
 import time
@@ -120,10 +119,10 @@ class PhysicsEvaluator:
             _init_jet_reco_worker(0.8, 0.0)
 
         if self.jet_metric_workers > 1 and batch_size > 1:
-            event_args = (
+            event_args = [
                 (x_np_tuple[i], x_hat_np_tuple[i], mask_np[i])
                 for i in range(batch_size)
-            )
+            ]
             executor_cls = (
                 ThreadPoolExecutor
                 if self.jet_metric_backend == "thread"
@@ -139,12 +138,14 @@ class PhysicsEvaluator:
                             self.jet_metric_start_method
                         ),
                     }
-                )
+            )
 
             t0 = time.perf_counter()
             with executor_cls(**executor_kwargs) as executor:
                 t0 = _profile_eval("eval jet metric pool start", t0)
-                for result in executor.map(_particle_jet_metrics_one_event, event_args):
+                for result in executor.map(
+                    _particle_jet_metrics_one_event, event_args
+                ):
                     (
                         ev_true_jet_pts,
                         ev_reco_jet_pts,

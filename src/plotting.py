@@ -1,4 +1,3 @@
-import os
 import math
 import numpy as np
 import matplotlib.pyplot as plt
@@ -351,11 +350,11 @@ def _clean_metric_name(metric):
     return metric.replace("metrics/", "").replace("/", "_")
 
 
-def plot_codebook_error_scatter(records, y_metrics, output_dir):
-    os.makedirs(output_dir, exist_ok=True)
+def plot_codebook_error_scatter(records, y_metrics):
     mh.style.use(mh.style.ROOT)
 
     colors = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b"]
+    figures = {}
 
     for metric_idx, metric in enumerate(y_metrics):
         metric_records = [
@@ -391,27 +390,24 @@ def plot_codebook_error_scatter(records, y_metrics, output_dir):
             ax.legend(prop={"size": 8})
 
         plt.tight_layout()
-        fig.savefig(os.path.join(output_dir, f"codebook_size_vs_{_clean_metric_name(metric)}.png"))
-        plt.close(fig)
+        figures[f"codebook_size_vs_{_clean_metric_name(metric)}.png"] = fig
+
+    return figures
 
 
-def replot_jet_structure(npz_files, run_labels, output_dir="replot_outputs"):
+def replot_jet_structure(runs_data, run_labels):
     """
-    Loads multiple .npz files and plots the superimposed histograms using mplhep.
+    Plots superimposed reconstruction histograms for multiple runs.
     
     Args:
-        npz_files (list of str): Paths to the .npz files.
+        runs_data (list of mapping): Histogram arrays for each run.
         run_labels (list of str): Legend labels for each run (e.g., ["FSQ 10", "FSQ 21"]).
-        output_dir (str): Directory to save the combined figures.
     """
-    os.makedirs(output_dir, exist_ok=True)
     mh.style.use(mh.style.ROOT)
+    figures = {}
     
     # Define distinct colors for the different runs
     colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b']
-
-    # Load all data dictionaries
-    runs_data = [np.load(f) for f in npz_files]
     
     # We can extract the bins and the "Original" truth from the very first run
     # (since the test set and bins are constant across all runs)
@@ -439,8 +435,7 @@ def replot_jet_structure(npz_files, run_labels, output_dir="replot_outputs"):
     ax_pt_res.set_ylabel("Density / Number of Jets")
     ax_pt_res.set_title("Jet Transverse Momentum Recovery")
     ax_pt_res.legend(prop={'size': 10})
-    fig_pt_res.savefig(os.path.join(output_dir, "combined_jet_pt_resolution.png"))
-    plt.close(fig_pt_res)
+    figures["combined_jet_pt_resolution.png"] = fig_pt_res
 
     # ==========================================
     # 2. Kinematic Features (Eta, Phi, pT)
@@ -478,8 +473,7 @@ def replot_jet_structure(npz_files, run_labels, output_dir="replot_outputs"):
         axes_kin[i].legend(prop={'size': 10})
 
     plt.tight_layout()
-    fig_kin.savefig(os.path.join(output_dir, "combined_kinematics.png"))
-    plt.close(fig_kin)
+    figures["combined_kinematics.png"] = fig_kin
 
     # ==========================================
     # 3. Energy and Residuals
@@ -517,14 +511,13 @@ def replot_jet_structure(npz_files, run_labels, output_dir="replot_outputs"):
     axs_e[1].legend(prop={'size': 10})
 
     plt.tight_layout()
-    fig_energy.savefig(os.path.join(output_dir, "combined_energy.png"))
-    plt.close(fig_energy)
+    figures["combined_energy.png"] = fig_energy
 
     # ==========================================
     # 4. Jet Substructure (Mass, Mass Diff, Tau32 Diff)
     # ==========================================
     # Check if substructure data exists (in case a run crashed before substructure or had N<3)
-    if "jet_mass_orig_counts" in ref_data.files:
+    if "jet_mass_orig_counts" in ref_data:
         fig_sub, axs_sub = plt.subplots(1, 3, figsize=(18, 5))
         fig_sub.suptitle("Jet Substructure Sweep", fontsize=16)
 
@@ -571,7 +564,6 @@ def replot_jet_structure(npz_files, run_labels, output_dir="replot_outputs"):
         axs_sub[2].legend(prop={'size': 10})
 
         plt.tight_layout()
-        fig_sub.savefig(os.path.join(output_dir, "combined_substructure.png"))
-        plt.close(fig_sub)
-        
-    print(f"Successfully generated comparison plots in '{output_dir}/'")
+        figures["combined_substructure.png"] = fig_sub
+
+    return figures

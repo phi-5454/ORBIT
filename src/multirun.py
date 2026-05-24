@@ -8,6 +8,7 @@ from datetime import datetime
 from pathlib import Path
 
 import lightning as L
+import matplotlib.pyplot as plt
 import numpy as np
 import wandb
 
@@ -90,6 +91,18 @@ def _write_summary_csv(path, records):
         writer.writerows(records)
 
 
+def _save_figures(figures, output_dir):
+    output_dir.mkdir(parents=True, exist_ok=True)
+    for filename, fig in figures.items():
+        fig.savefig(output_dir / filename)
+        plt.close(fig)
+
+
+def _load_npz_dict(path):
+    with np.load(path) as data:
+        return {key: data[key] for key in data.files}
+
+
 def _make_suite_id(multirun_cfg):
     explicit_suite_id = multirun_cfg.get("suite_id")
     if explicit_suite_id:
@@ -161,12 +174,19 @@ def collect_codebook_multirun(config):
 
     _write_summary_csv(suite_dir / "summary.csv", records)
     _write_json(suite_dir / "manifest.json", records)
-    plot_codebook_error_scatter(records, y_metrics=y_metrics, output_dir=str(comparison_dir))
+    _save_figures(
+        plot_codebook_error_scatter(records, y_metrics=y_metrics),
+        comparison_dir,
+    )
 
     npz_files = [record["hist_path"] for record in records if record.get("hist_path")]
     run_labels = [f"{record['label']}, seed {record['seed']}" for record in records if record.get("hist_path")]
     if npz_files:
-        replot_jet_structure(npz_files=npz_files, run_labels=run_labels, output_dir=str(comparison_dir))
+        runs_data = [_load_npz_dict(path) for path in npz_files]
+        _save_figures(
+            replot_jet_structure(runs_data=runs_data, run_labels=run_labels),
+            comparison_dir,
+        )
 
     return {
         "suite_id": suite_id,

@@ -1,8 +1,37 @@
 import argparse
+import importlib.util
 import os
+import sys
 from pathlib import Path
 
+
+def _eos_home_alias(path):
+    parts = path.parts
+    if len(parts) >= 5 and parts[:3] == ("/", "eos", "user"):
+        initial = parts[3]
+        return Path("/", "eos", f"home-{initial}", *parts[4:])
+    return None
+
+
+def _canonical_repo_root(path):
+    alias = _eos_home_alias(path)
+    if alias is not None and alias.exists():
+        return alias
+    return path
+
+
+BASE_DIR = _canonical_repo_root(Path(__file__).resolve().parent.parent)
+SRC_DIR = BASE_DIR / "src"
+RESOURCE_DIR = BASE_DIR / "resources"
+
+
+for path in (BASE_DIR, _eos_home_alias(BASE_DIR), SRC_DIR):
+    if path is not None and str(path) not in sys.path:
+        sys.path.insert(0, str(path))
+
 import hydra
+import matplotlib.pyplot as plt
+import numpy as np
 from dotenv import load_dotenv
 from omegaconf import DictConfig, OmegaConf
 
@@ -16,9 +45,18 @@ import uuid
 # from train_eval import TrainPipeline
 
 USERNAME = os.environ.get("USER")
-BASE_DIR = Path(__file__).resolve().parent.parent
-SRC_DIR = BASE_DIR / "src"
-RESOURCE_DIR = BASE_DIR / "resources"
+
+if __name__ == "__main__":
+    __package__ = "src"
+    main_module = sys.modules["__main__"]
+    sys.modules.setdefault("src.main", main_module)
+    main_spec = importlib.util.spec_from_file_location(
+        "src.main",
+        SRC_DIR / "main.py",
+    )
+    main_module.__spec__ = main_spec
+    main_module.__loader__ = main_spec.loader
+    main_module.__file__ = str(SRC_DIR / "main.py")
 
 def _as_list(value, field_name):
     if isinstance(value, str):
@@ -63,14 +101,36 @@ def make_run_name(base_name=None):
     unique_run_name = f"{base_name}_{timestamp}_{short_id}"
     return unique_run_name
 
+
+def _save_figures(figures, output_dir):
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    for filename, fig in figures.items():
+        fig.savefig(output_dir / filename)
+        plt.close(fig)
+
+
+def _load_npz_dict(path):
+    with np.load(path) as data:
+        return {key: data[key] for key in data.files}
+
 @hydra.main(
     version_base=None, config_path=str(BASE_DIR / "conf"), config_name="config.yaml"
 )
 def main(cfg: DictConfig):
     if(cfg["replot_only"]):
-        npz_files = [f"{cfg["replot"]["in_base_dir"]}/{f}" for f in cfg["replot"]["in_files"]]
-        # TODO: Put the output plots into the original run's directory.
-        replot_jet_structure(npz_files=npz_files, run_labels=cfg["replot"]["run_labels"], output_dir=f"{cfg["replot"]["in_base_dir"]}/combined_plots")
+        npz_files = [
+            f"{cfg['replot']['in_base_dir']}/{filename}"
+            for filename in cfg["replot"]["in_files"]
+        ]
+        runs_data = [_load_npz_dict(path) for path in npz_files]
+        _save_figures(
+            replot_jet_structure(
+                runs_data=runs_data,
+                run_labels=cfg["replot"]["run_labels"],
+            ),
+            f"{cfg['replot']['in_base_dir']}/combined_plots",
+        )
         return
 
     BASE_DIR = Path(__file__).resolve().parent.parent
