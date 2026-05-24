@@ -1,6 +1,9 @@
 import multiprocessing as mp
 import os
+import sys
+import threading
 import time
+import traceback
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 
 import awkward as ak
@@ -22,51 +25,90 @@ def _profile_eval(label, start_time):
     return time.perf_counter()
 
 
+def _log_fastjet_worker_exception(message):
+    process = mp.current_process()
+    print(
+        "[ORBIT_FASTJET_WORKER_ERROR] "
+        f"pid={os.getpid()} process={process.name} "
+        f"thread={threading.get_ident()} {message}",
+        file=sys.stderr,
+        flush=True,
+    )
+    traceback.print_exc(file=sys.stderr)
+    sys.stderr.flush()
+
+
+def _safe_count_nonzero(array):
+    try:
+        return np.count_nonzero(array)
+    except Exception:
+        return "unavailable"
+
+
 def _init_jet_reco_worker(R, min_jet_pt):
-    global _WORKER_JET_RECO
-    _WORKER_JET_RECO = EventJetReconstructor(R=R, min_jet_pt=min_jet_pt)
+    try:
+        global _WORKER_JET_RECO
+        _WORKER_JET_RECO = EventJetReconstructor(R=R, min_jet_pt=min_jet_pt)
+    except Exception:
+        _log_fastjet_worker_exception(
+            f"failed to initialize EventJetReconstructor R={R} min_jet_pt={min_jet_pt}"
+        )
+        raise
 
 
 def _particle_jet_metrics_one_event(args):
     x_event, x_hat_event, ev_mask = args
 
-    jet_reco = _WORKER_JET_RECO
-    if jet_reco is None:
-        jet_reco = EventJetReconstructor(R=0.8, min_jet_pt=0.0)
+    try:
+        jet_reco = _WORKER_JET_RECO
+        if jet_reco is None:
+            jet_reco = EventJetReconstructor(R=0.8, min_jet_pt=0.0)
 
-    ev_x_eta = x_event[ev_mask, 0]
-    ev_x_phi = x_event[ev_mask, 1]
-    ev_x_pt = x_event[ev_mask, 2]
-    ev_xhat_eta = x_hat_event[ev_mask, 0]
-    ev_xhat_phi = x_hat_event[ev_mask, 1]
-    ev_xhat_pt = x_hat_event[ev_mask, 2]
+        ev_x_eta = x_event[ev_mask, 0]
+        ev_x_phi = x_event[ev_mask, 1]
+        ev_x_pt = x_event[ev_mask, 2]
+        ev_xhat_eta = x_hat_event[ev_mask, 0]
+        ev_xhat_phi = x_hat_event[ev_mask, 1]
+        ev_xhat_pt = x_hat_event[ev_mask, 2]
 
-    true_jets = jet_reco(ev_x_pt, ev_x_eta, ev_x_phi)
-    reco_jets = jet_reco(ev_xhat_pt, ev_xhat_eta, ev_xhat_phi)
+        true_jets = jet_reco(ev_x_pt, ev_x_eta, ev_x_phi)
+        reco_jets = jet_reco(ev_xhat_pt, ev_xhat_eta, ev_xhat_phi)
 
-    true_jet_pts, reco_jet_pts = [], []
-    true_jet_masses, reco_jet_masses = [], []
-    true_tau32s, reco_tau32s = [], []
+        true_jet_pts, reco_jet_pts = [], []
+        true_jet_masses, reco_jet_masses = [], []
+        true_tau32s, reco_tau32s = [], []
 
-    n_match = min(len(true_jets["pt"]), len(reco_jets["pt"]))
-    if n_match > 0:
-        true_jet_pts.extend(true_jets["pt"][:n_match])
-        reco_jet_pts.extend(reco_jets["pt"][:n_match])
+        n_match = min(len(true_jets["pt"]), len(reco_jets["pt"]))
+        if n_match > 0:
+            true_jet_pts.extend(true_jets["pt"][:n_match])
+            reco_jet_pts.extend(reco_jets["pt"][:n_match])
 
-    if true_jets["jet_n_constituents"] >= 3 and reco_jets["jet_n_constituents"] >= 3:
-        true_jet_masses.append(true_jets["jet_mass"])
-        reco_jet_masses.append(reco_jets["jet_mass"])
-        true_tau32s.append(true_jets["tau32"])
-        reco_tau32s.append(reco_jets["tau32"])
+        if (
+            true_jets["jet_n_constituents"] >= 3
+            and reco_jets["jet_n_constituents"] >= 3
+        ):
+            true_jet_masses.append(true_jets["jet_mass"])
+            reco_jet_masses.append(reco_jets["jet_mass"])
+            true_tau32s.append(true_jets["tau32"])
+            reco_tau32s.append(reco_jets["tau32"])
 
-    return (
-        true_jet_pts,
-        reco_jet_pts,
-        true_jet_masses,
-        reco_jet_masses,
-        true_tau32s,
-        reco_tau32s,
-    )
+        return (
+            true_jet_pts,
+            reco_jet_pts,
+            true_jet_masses,
+            reco_jet_masses,
+            true_tau32s,
+            reco_tau32s,
+        )
+    except Exception:
+        _log_fastjet_worker_exception(
+            "failed while reconstructing particle jet metrics "
+            f"x_event_shape={getattr(x_event, 'shape', None)} "
+            f"x_hat_event_shape={getattr(x_hat_event, 'shape', None)} "
+            f"mask_shape={getattr(ev_mask, 'shape', None)} "
+            f"mask_true={_safe_count_nonzero(ev_mask)}"
+        )
+        raise
 
 
 class PhysicsEvaluator:
