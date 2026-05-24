@@ -63,11 +63,10 @@ class VQQuantizer(nn.Module):
         import sys
         from pathlib import Path
 
-        try:
-            from vqtorch.nn import VectorQuant
-        except ModuleNotFoundError:
-            sys.path.append(str(Path(__file__).resolve().parent.parent / "vqtorch"))
-            from vqtorch.nn import VectorQuant
+        vendored_vqtorch = str(Path(__file__).resolve().parent.parent / "vqtorch")
+        if vendored_vqtorch not in sys.path:
+            sys.path.insert(0, vendored_vqtorch)
+        from vqtorch.nn import VectorQuant
 
         if feature_size <= 0:
             raise ValueError("feature_size must be positive for VQQuantizer")

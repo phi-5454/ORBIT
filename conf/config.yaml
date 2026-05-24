@@ -86,7 +86,7 @@ multirun:
       alpha_quantizer: "vq"
       fsq_mu_levels: []
       fsq_alpha_levels: []
-      vq_mu_dim: 3
+      vq_mu_dim: 4
       vq_alpha_dim: 0
       vq_mu_num_codes: 256
       vq_alpha_num_codes: 0
@@ -97,7 +97,7 @@ multirun:
       alpha_quantizer: "vq"
       fsq_mu_levels: []
       fsq_alpha_levels: []
-      vq_mu_dim: 3
+      vq_mu_dim: 4
       vq_alpha_dim: 0
       vq_mu_num_codes: 512
       vq_alpha_num_codes: 0
@@ -108,7 +108,7 @@ multirun:
       alpha_quantizer: "vq"
       fsq_mu_levels: []
       fsq_alpha_levels: []
-      vq_mu_dim: 3
+      vq_mu_dim: 4
       vq_alpha_dim: 0
       vq_mu_num_codes: 1024
       vq_alpha_num_codes: 0
@@ -119,7 +119,7 @@ multirun:
       alpha_quantizer: "vq"
       fsq_mu_levels: []
       fsq_alpha_levels: []
-      vq_mu_dim: 3
+      vq_mu_dim: 4
       vq_alpha_dim: 0
       vq_mu_num_codes: 256
       vq_alpha_num_codes: 0
@@ -130,7 +130,7 @@ multirun:
       alpha_quantizer: "vq"
       fsq_mu_levels: []
       fsq_alpha_levels: []
-      vq_mu_dim: 3
+      vq_mu_dim: 4
       vq_alpha_dim: 0
       vq_mu_num_codes: 512
       vq_alpha_num_codes: 0
@@ -141,7 +141,7 @@ multirun:
       alpha_quantizer: "vq"
       fsq_mu_levels: []
       fsq_alpha_levels: []
-      vq_mu_dim: 3
+      vq_mu_dim: 4
       vq_alpha_dim: 0
       vq_mu_num_codes: 1024
       vq_alpha_num_codes: 0
