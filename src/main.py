@@ -1,7 +1,4 @@
-import argparse
-import importlib.util
 import os
-import sys
 from pathlib import Path
 
 
@@ -21,13 +18,6 @@ def _canonical_repo_root(path):
 
 
 BASE_DIR = _canonical_repo_root(Path(__file__).resolve().parent.parent)
-SRC_DIR = BASE_DIR / "src"
-RESOURCE_DIR = BASE_DIR / "resources"
-
-
-for path in (BASE_DIR, _eos_home_alias(BASE_DIR), SRC_DIR):
-    if path is not None and str(path) not in sys.path:
-        sys.path.insert(0, str(path))
 
 import hydra
 import matplotlib.pyplot as plt
@@ -36,32 +26,13 @@ from dotenv import load_dotenv
 from omegaconf import DictConfig, OmegaConf
 
 import wandb
-try:
-    from .multirun import run_codebook_multirun
-    from .plotting import replot_jet_structure
-    from .train_eval import TrainPipeline
-except ImportError:
-    from multirun import run_codebook_multirun
-    from plotting import replot_jet_structure
-    from train_eval import TrainPipeline
+from .multirun import run_codebook_multirun
+from .plotting import replot_jet_structure
+from .train_eval import TrainPipeline
 import datetime
 import uuid
 
-# from train_eval import TrainPipeline
-
 USERNAME = os.environ.get("USER")
-
-if __name__ == "__main__":
-    __package__ = "src"
-    main_module = sys.modules["__main__"]
-    sys.modules.setdefault("src.main", main_module)
-    main_spec = importlib.util.spec_from_file_location(
-        "src.main",
-        SRC_DIR / "main.py",
-    )
-    main_module.__spec__ = main_spec
-    main_module.__loader__ = main_spec.loader
-    main_module.__file__ = str(SRC_DIR / "main.py")
 
 def _as_list(value, field_name):
     if isinstance(value, str):
@@ -137,10 +108,6 @@ def main(cfg: DictConfig):
             f"{cfg['replot']['in_base_dir']}/combined_plots",
         )
         return
-
-    BASE_DIR = Path(__file__).resolve().parent.parent
-    SRC_DIR = BASE_DIR / "src"
-    RESOURCE_DIR = BASE_DIR / "resources"
 
     # Hydra config to a python dict
     config = OmegaConf.to_container(cfg, resolve=True, throw_on_missing=True) or {}

@@ -9,12 +9,8 @@ import numpy as np
 import torch.nn.functional as F
 import vector
 
-try:
-    from .data_loading import PreprocessTranformer
-    from .plotting import add_reconstruction_plots
-except ImportError:
-    from data_loading import PreprocessTranformer
-    from plotting import add_reconstruction_plots
+from .data_loading import PreprocessTranformer
+from .plotting import add_reconstruction_plots
 
 _WORKER_JET_RECO = None
 

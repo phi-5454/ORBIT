@@ -9,14 +9,9 @@ import torch.nn.functional as F
 from torch.optim.lr_scheduler import LambdaLR
 
 import wandb
-try:
-    from . import torch_modules as tm
-    from .eval_metrics import PhysicsEvaluator
-    from .plotting import attention_delta_eta_phi_figure, attention_map_figure, close_figure
-except ImportError:
-    import torch_modules as tm
-    from eval_metrics import PhysicsEvaluator
-    from plotting import attention_delta_eta_phi_figure, attention_map_figure, close_figure
+from . import torch_modules as tm
+from .eval_metrics import PhysicsEvaluator
+from .plotting import attention_delta_eta_phi_figure, attention_map_figure, close_figure
 
 
 class PHA_FSQ_VAE(L.LightningModule):
