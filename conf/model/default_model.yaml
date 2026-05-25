@@ -9,6 +9,7 @@ transformer_max_lr: 0.001
 transformer_final_lr: 0.0003
 lr_warmup_epochs: 4
 lr_decay_to_initial_epochs: 20
+lr_update_interval_steps: 1 # Set to 100 to update the scheduler every 100 optimizer steps.
 #hidden_dim: 64
 hidden_dim: 128
 batch_size: 32

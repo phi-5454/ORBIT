@@ -699,15 +699,17 @@ class PHA_FSQ_VAE(L.LightningModule):
 
         scheduler = LambdaLR(
             optimizer,
-            lr_lambda=lambda epoch: self._lr_at_epoch(epoch, schedule_cfg)
+            lr_lambda=lambda scheduler_step: self._lr_at_step(
+                scheduler_step, schedule_cfg
+            )
             / schedule_cfg["max_lr"],
         )
         return {
             "optimizer": optimizer,
             "lr_scheduler": {
                 "scheduler": scheduler,
-                "interval": "epoch",
-                "frequency": 1,
+                "interval": "step",
+                "frequency": schedule_cfg["update_interval_steps"],
             },
         }
 
@@ -723,6 +725,10 @@ class PHA_FSQ_VAE(L.LightningModule):
         except RuntimeError:
             total_epochs = 0
 
+        update_interval_steps = max(
+            int(model_cfg.get("lr_update_interval_steps", 1)), 1
+        )
+
         return {
             "initial_lr": float(model_cfg[f"{prefix}_initial_lr"]),
             "max_lr": float(model_cfg[f"{prefix}_max_lr"]),
@@ -732,7 +738,24 @@ class PHA_FSQ_VAE(L.LightningModule):
                 model_cfg.get("lr_decay_to_initial_epochs", 20)
             ),
             "total_epochs": total_epochs,
+            "steps_per_epoch": self._steps_per_epoch(total_epochs),
+            "update_interval_steps": update_interval_steps,
         }
+
+    def _steps_per_epoch(self, total_epochs):
+        if total_epochs <= 0:
+            return 1.0
+
+        try:
+            total_steps = int(
+                getattr(self.trainer, "estimated_stepping_batches", 0) or 0
+            )
+        except RuntimeError:
+            total_steps = 0
+
+        if total_steps <= 0:
+            return 1.0
+        return max(total_steps / total_epochs, 1.0)
 
     @staticmethod
     def _smooth_interp(start, end, position, span):
@@ -741,6 +764,11 @@ class PHA_FSQ_VAE(L.LightningModule):
         fraction = min(max(position / span, 0.0), 1.0)
         fraction = 0.5 - 0.5 * np.cos(np.pi * fraction)
         return start + fraction * (end - start)
+
+    def _lr_at_step(self, scheduler_step, schedule_cfg):
+        optimizer_step = scheduler_step * schedule_cfg["update_interval_steps"]
+        epoch = optimizer_step / schedule_cfg["steps_per_epoch"]
+        return self._lr_at_epoch(epoch, schedule_cfg)
 
     def _lr_at_epoch(self, epoch, schedule_cfg):
         warmup_epochs = schedule_cfg["warmup_epochs"]
