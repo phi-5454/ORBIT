@@ -98,7 +98,6 @@ multirun:
       vq_mu_num_codes: 256
       vq_alpha_num_codes: 0
       vq_gradient_estimator: "ste"
-      reconstruction_loss: "mse"
       beta_mu: 10.0
       beta_alpha: 10.0
       vq_beta: 0.9
@@ -119,7 +118,6 @@ multirun:
       vq_mu_num_codes: 512
       vq_alpha_num_codes: 0
       vq_gradient_estimator: "ste"
-      reconstruction_loss: "mse"
       beta_mu: 10.0
       beta_alpha: 10.0
       vq_beta: 0.9
@@ -141,7 +139,6 @@ multirun:
       vq_alpha_num_codes: 0
       vq_gradient_estimator: "ste"
       use_attention: False
-      reconstruction_loss: "mse"
       beta_mu: 10.0
       beta_alpha: 10.0
       vq_beta: 0.9
@@ -162,7 +159,6 @@ multirun:
       vq_mu_num_codes: 1024
       vq_alpha_num_codes: 0
       vq_gradient_estimator: "ste"
-      reconstruction_loss: "mse"
       beta_mu: 10.0
       beta_alpha: 10.0
       vq_beta: 0.9
@@ -183,7 +179,6 @@ multirun:
       vq_mu_num_codes: 256
       vq_alpha_num_codes: 0
       vq_gradient_estimator: "rotation_trick"
-      reconstruction_loss: "mse"
       beta_mu: 10.0
       beta_alpha: 10.0
       vq_beta: 0.9
@@ -204,7 +199,6 @@ multirun:
       vq_mu_num_codes: 512
       vq_alpha_num_codes: 0
       vq_gradient_estimator: "rotation_trick"
-      reconstruction_loss: "mse"
       beta_mu: 10.0
       beta_alpha: 10.0
       vq_beta: 0.9
@@ -225,7 +219,6 @@ multirun:
       vq_mu_num_codes: 1024
       vq_alpha_num_codes: 0
       vq_gradient_estimator: "rotation_trick"
-      reconstruction_loss: "mse"
       beta_mu: 10.0
       beta_alpha: 10.0
       vq_beta: 0.9
