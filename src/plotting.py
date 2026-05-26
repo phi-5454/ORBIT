@@ -354,7 +354,36 @@ def plot_codebook_error_scatter(records, y_metrics):
     mh.style.use(mh.style.ROOT)
 
     colors = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b"]
+    markers = ["o", "s", "^", "D", "v", "P", "X", "*", "<", ">", "h", "8", "p", "H"]
     figures = {}
+
+    def add_scatter_figure(metric_records, metric, x_value, x_label, title, filename, log_x=False):
+        fig, ax = plt.subplots(figsize=(8, 6))
+
+        for i, record in enumerate(metric_records):
+            ax.scatter(
+                x_value(record),
+                record[metric],
+                color=colors[i % len(colors)],
+                marker=markers[i % len(markers)],
+                alpha=0.8,
+                s=45,
+                label=record.get("label", record.get("run_name", f"run_{i}")),
+            )
+
+        if log_x:
+            ax.set_xscale("log")
+        ax.set_yscale("log")
+        ax.set_xlabel(x_label)
+        ax.set_ylabel(metric.replace("metrics/", ""))
+        ax.set_title(title)
+
+        handles, labels = ax.get_legend_handles_labels()
+        if len(labels) <= 12:
+            ax.legend(prop={"size": 8})
+
+        plt.tight_layout()
+        figures[filename] = fig
 
     for metric_idx, metric in enumerate(y_metrics):
         metric_records = [
@@ -367,30 +396,26 @@ def plot_codebook_error_scatter(records, y_metrics):
         if not metric_records:
             continue
 
-        fig, ax = plt.subplots(figsize=(8, 6))
+        metric_name = metric.replace("metrics/", "")
+        clean_metric_name = _clean_metric_name(metric)
 
-        for i, record in enumerate(metric_records):
-            ax.scatter(
-                record["total_codebook_size"],
-                record[metric],
-                color=colors[i % len(colors)],
-                alpha=0.8,
-                s=45,
-                label=record.get("label", record.get("run_name", f"run_{i}")),
-            )
-
-        ax.set_xscale("log")
-        ax.set_yscale("log")
-        ax.set_xlabel("Total codebook size")
-        ax.set_ylabel(metric.replace("metrics/", ""))
-        ax.set_title(f"Codebook size vs. {metric.replace('metrics/', '')}")
-
-        handles, labels = ax.get_legend_handles_labels()
-        if len(labels) <= 12:
-            ax.legend(prop={"size": 8})
-
-        plt.tight_layout()
-        figures[f"codebook_size_vs_{_clean_metric_name(metric)}.png"] = fig
+        add_scatter_figure(
+            metric_records=metric_records,
+            metric=metric,
+            x_value=lambda record: record["total_codebook_size"],
+            x_label="Total codebook size",
+            title=f"Codebook size vs. {metric_name}",
+            filename=f"codebook_size_vs_{clean_metric_name}.png",
+            log_x=True,
+        )
+        add_scatter_figure(
+            metric_records=metric_records,
+            metric=metric,
+            x_value=lambda record: math.ceil(math.log2(record["total_codebook_size"])),
+            x_label="Bits required to represent codebook",
+            title=f"Codebook bits vs. {metric_name}",
+            filename=f"codebook_bits_vs_{clean_metric_name}.png",
+        )
 
     return figures
 
