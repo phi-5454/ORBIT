@@ -18,7 +18,7 @@ run_validation: True
 run_test: False
 earlystopping_patience: 5
 num_dataload_workers: 0
-num_eval_workers: 8
+num_eval_workers: 0
 eval_worker_backend: "process" # "process" or "thread"
 eval_worker_start_method: "forkserver" # "fork", "forkserver", or "spawn"
 replot_only: False
