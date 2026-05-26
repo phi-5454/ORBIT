@@ -350,25 +350,72 @@ def _clean_metric_name(metric):
     return metric.replace("metrics/", "").replace("/", "_")
 
 
+def _codebook_family(record):
+    label = str(record.get("label", record.get("run_name", ""))).lower()
+    if label.startswith("fsq"):
+        return "fsq"
+    if label.startswith("vq") and "rotation" in label:
+        return "vq_rotation"
+    if label.startswith("vq") and "ste" in label:
+        return "vq_ste"
+    return None
+
+
 def plot_codebook_error_scatter(records, y_metrics):
     mh.style.use(mh.style.ROOT)
 
     colors = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b"]
+    family_colors = {
+        "fsq": "#1f77b4",
+        "vq_ste": "#ff7f0e",
+        "vq_rotation": "#2ca02c",
+    }
+    family_markers = {
+        "fsq": "o",
+        "vq_ste": "s",
+        "vq_rotation": "^",
+    }
+    family_labels = {
+        "fsq": "FSQ",
+        "vq_ste": "VQ STE",
+        "vq_rotation": "VQ rotation",
+    }
     markers = ["o", "s", "^", "D", "v", "P", "X", "*", "<", ">", "h", "8", "p", "H"]
     figures = {}
 
     def add_scatter_figure(metric_records, metric, x_value, x_label, title, filename, log_x=False):
         fig, ax = plt.subplots(figsize=(8, 6))
+        family_handles = []
+
+        for family, family_label in family_labels.items():
+            family_records = [
+                record for record in metric_records if _codebook_family(record) == family
+            ]
+            if len(family_records) < 2:
+                continue
+            family_records = sorted(family_records, key=x_value)
+            (line,) = ax.plot(
+                [x_value(record) for record in family_records],
+                [record[metric] for record in family_records],
+                color=family_colors[family],
+                alpha=0.55,
+                linewidth=1.5,
+                label=family_label,
+                zorder=1,
+            )
+            family_handles.append(line)
 
         for i, record in enumerate(metric_records):
+            family = _codebook_family(record)
             ax.scatter(
                 x_value(record),
                 record[metric],
-                color=colors[i % len(colors)],
-                marker=markers[i % len(markers)],
+                color=family_colors.get(family, colors[i % len(colors)]),
+                marker=family_markers.get(family, markers[i % len(markers)]),
                 alpha=0.8,
                 s=45,
                 label=record.get("label", record.get("run_name", f"run_{i}")),
+                zorder=2,
             )
 
         if log_x:
@@ -381,6 +428,8 @@ def plot_codebook_error_scatter(records, y_metrics):
         handles, labels = ax.get_legend_handles_labels()
         if len(labels) <= 12:
             ax.legend(prop={"size": 8})
+        elif family_handles:
+            ax.legend(handles=family_handles, prop={"size": 8})
 
         plt.tight_layout()
         figures[filename] = fig
