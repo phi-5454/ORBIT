@@ -352,6 +352,8 @@ def _clean_metric_name(metric):
 
 def _codebook_family(record):
     label = str(record.get("label", record.get("run_name", ""))).lower()
+    if "mlp" in label:
+        return None
     if label.startswith("fsq"):
         return "fsq"
     if label.startswith("vq") and "rotation" in label:
