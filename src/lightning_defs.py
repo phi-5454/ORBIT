@@ -308,21 +308,25 @@ class PHA_FSQ_VAE(L.LightningModule):
                 self.test_used_codes_combined,
             )
 
+        metrics = {}
         if self.dim_mu > 0:
+            utilization_mu = len(set_mu) / self.total_codes_mu
             self.log(
                 f"{prefix}_metrics/utilization_mu",
-                len(set_mu) / self.total_codes_mu,
+                utilization_mu,
                 sync_dist=True,
             )
             self.log(
                 f"{prefix}_metrics/active_codes_mu", float(len(set_mu)), sync_dist=True
             )
+            metrics["metrics/utilization_mu"] = utilization_mu
             set_mu.clear()
 
         if self.dim_alpha > 0:
+            utilization_alpha = len(set_alpha) / self.total_codes_alpha
             self.log(
                 f"{prefix}_metrics/utilization_alpha",
-                len(set_alpha) / self.total_codes_alpha,
+                utilization_alpha,
                 sync_dist=True,
             )
             self.log(
@@ -330,12 +334,14 @@ class PHA_FSQ_VAE(L.LightningModule):
                 float(len(set_alpha)),
                 sync_dist=True,
             )
+            metrics["metrics/utilization_alpha"] = utilization_alpha
             set_alpha.clear()
 
         if self.dim_mu > 0 and self.dim_alpha > 0:
+            utilization_combined = len(set_comb) / self.total_codes_combined
             self.log(
                 f"{prefix}_metrics/utilization_combined",
-                len(set_comb) / self.total_codes_combined,
+                utilization_combined,
                 sync_dist=True,
             )
             self.log(
@@ -343,7 +349,9 @@ class PHA_FSQ_VAE(L.LightningModule):
                 float(len(set_comb)),
                 sync_dist=True,
             )
+            metrics["metrics/utilization_combined"] = utilization_combined
             set_comb.clear()
+        self._save_metrics(prefix, metrics)
 
     def forward(self, x, mask):
         # 1. Encode
@@ -977,14 +985,24 @@ class PHA_FSQ_VAE(L.LightningModule):
 
         t0 = self._timing_log(f"{prefix} save/log histograms", t0)
 
-        if metrics_to_save:
-            save_dir = self.output_dir + "/" + "saved_metrics"
-            os.makedirs(save_dir, exist_ok=True)
-            filepath = f"{save_dir}/{prefix}_metrics_step_{self.global_step}.json"
-            with open(filepath, "w") as f:
-                json.dump(metrics_to_save, f, indent=2, sort_keys=True)
+        self._save_metrics(prefix, metrics_to_save)
 
         self._timing_log(f"{prefix} save metrics", t0)
+
+    def _save_metrics(self, prefix, metrics):
+        if not metrics:
+            return
+
+        save_dir = self.output_dir + "/" + "saved_metrics"
+        os.makedirs(save_dir, exist_ok=True)
+        filepath = f"{save_dir}/{prefix}_metrics_step_{self.global_step}.json"
+        saved_metrics = {}
+        if os.path.exists(filepath):
+            with open(filepath) as f:
+                saved_metrics = json.load(f)
+        saved_metrics.update(metrics)
+        with open(filepath, "w") as f:
+            json.dump(saved_metrics, f, indent=2, sort_keys=True)
 
     '''
     def on_fit_start(self) -> None:

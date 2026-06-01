@@ -2,95 +2,518 @@ import math
 import numpy as np
 import matplotlib.pyplot as plt
 import mplhep as mh
-import seaborn as sns
 import torch
+from matplotlib.lines import Line2D
 
-def exploratory_feature_histograms(x_np, x_hat_np, mse_per_feature, feature_names):
-    fig, axes = plt.subplots(1, 3, figsize=(18, 5))
-    fig.suptitle("FSQ-VAE: Original vs. Reconstructed Features", fontsize=16)
+# =============================================================================
+# Plot style macros
+# =============================================================================
 
-    for i in range(3):
-        sns.histplot(
-            x_np[:, i],
-            bins=50,
-            color="blue",
-            alpha=0.5,
-            label="Original",
-            kde=False,
-            stat="density",
-            ax=axes[i],
-        )
-        sns.histplot(
-            x_hat_np[:, i],
-            bins=50,
-            color="orange",
-            alpha=0.5,
-            label="Reconstructed",
-            kde=False,
-            stat="density",
-            ax=axes[i],
-        )
+ORIGINAL_COLOR = "#0000ff"
+RECONSTRUCTED_COLOR = ORIGINAL_COLOR
+TRUTH_REFERENCE_COLOR = "grey"
+RESIDUAL_COLOR = ORIGINAL_COLOR
+RUN_COLORS = ("#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b")
+CODEBOOK_FAMILY_COLORS = {
+    "fsq": "#1f77b4",
+    "vq_ste": "#ff7f0e",
+    "vq_rotation": "#2ca02c",
+}
+CODEBOOK_FAMILY_MARKERS = {
+    "fsq": "o",
+    "vq_ste": "s",
+    "vq_rotation": "^",
+}
+CODEBOOK_FAMILY_LABELS = {
+    "fsq": "FSQ",
+    "vq_ste": "VQ STE",
+    "vq_rotation": "VQ rotation",
+}
+SCATTER_MARKERS = ("o", "s", "^", "D", "v", "P", "X", "*", "<", ">", "h", "8", "p", "H")
+HISTOGRAM_LINEWIDTH = 2
+HISTOGRAM_FILL_ALPHA = 0.5
+TRUTH_REFERENCE_FILL_ALPHA = 0.35
+SCATTER_LINE_ALPHA = 0.55
+SCATTER_POINT_ALPHA = 0.8
+SCATTER_LINEWIDTH = 1.5
+REFERENCE_LINE_COLOR = "black"
+REFERENCE_LINE_STYLE = "--"
+REFERENCE_LINE_ALPHA = 0.5
+FEATURE_FIGSIZE = (21, 8)
+ENERGY_FIGSIZE = (16, 5)
+RESOLUTION_FIGSIZE = (8, 6)
+SUBSTRUCTURE_FIGSIZE = (21, 8)
+SUBSTRUCTURE_SIMPLE_FIGSIZE = (18, 8)
+SUBSTRUCTURE_COMPARISON_FIGSIZE = (21, 7)
+ATTENTION_DELTA_FIGSIZE = (6, 5)
+ATTENTION_MAP_FIGSIZE = (5, 4)
+SCATTER_FIGSIZE = (8, 6)
+RATIO_HEIGHT_RATIOS = (3, 1)
+RATIO_HSPACE = 0.08
+RATIO_WSPACE = 0.25
+RATIO_YLIM = (0.5, 1.5)
+UTILIZATION_YLIM = (0.0, 1.05)
+PLOT_TITLES_ENABLED = True
 
-        axes[i].set_title(f"{feature_names[i]} (MSE: {mse_per_feature[i]:.4f})")
-        axes[i].legend()
 
-    plt.tight_layout()
-    return fig
+# =============================================================================
+# Shared plot styling and layout helpers
+# =============================================================================
 
 
-def exploratory_energy_histograms(x_np, x_hat_np, mse_per_feature):
-    fig, axs = plt.subplots(1, 2, figsize=(16, 5))
+def set_plot_titles_enabled(enabled):
+    global PLOT_TITLES_ENABLED
+    PLOT_TITLES_ENABLED = enabled
 
-    masses_orig = x_np[:, 2] * np.cosh(x_np[:, 0])
-    masses_reco = x_hat_np[:, 2] * np.cosh(x_hat_np[:, 0])
 
-    min_val = max(min(masses_orig.min(), masses_reco.min()), 1e-8)
-    max_val = max(masses_orig.max(), masses_reco.max()).max()
-    log_bins = np.logspace(np.log10(min_val), np.log10(max_val), num=50)
+def _set_title(ax, title, **kwargs):
+    if PLOT_TITLES_ENABLED:
+        ax.set_title(title, **kwargs)
 
-    axs[0].set_title("FSQ-VAE: Original vs. Reconstructed mass", fontsize=16)
-    sns.histplot(
-        masses_orig,
-        bins=log_bins,
-        color="blue",
-        alpha=0.5,
-        label="Original",
-        kde=False,
-        stat="density",
-        ax=axs[0],
+
+def _set_suptitle(fig, title, **kwargs):
+    if PLOT_TITLES_ENABLED:
+        fig.suptitle(title, **kwargs)
+
+
+def _plot_filled_histogram(
+    ax,
+    bins,
+    counts,
+    label,
+    color=ORIGINAL_COLOR,
+    alpha=HISTOGRAM_FILL_ALPHA,
+):
+    mh.histplot(
+        counts,
+        bins=bins,
+        ax=ax,
+        label=label,
+        color=color,
+        histtype="fill",
+        alpha=alpha,
+        edgecolor="none",
     )
-    sns.histplot(
-        masses_reco,
-        bins=log_bins,
-        color="orange",
-        alpha=0.5,
+
+
+def _plot_single_histogram(ax, bins, counts, label=None, color=ORIGINAL_COLOR):
+    mh.histplot(
+        counts,
+        bins=bins,
+        ax=ax,
+        label=label,
+        color=color,
+        histtype="step",
+        linewidth=HISTOGRAM_LINEWIDTH,
+    )
+
+
+def _plot_original_reconstructed_histograms(ax, bins, original, reconstructed):
+    _plot_filled_histogram(
+        ax,
+        bins,
+        original,
+        label="Original",
+        color=ORIGINAL_COLOR,
+    )
+    _plot_single_histogram(
+        ax,
+        bins,
+        reconstructed,
         label="Reconstructed",
-        kde=False,
-        stat="density",
-        ax=axs[0],
+        color=RECONSTRUCTED_COLOR,
     )
 
-    axs[1].set_title("FSQ-VAE: m_reco - m_original", fontsize=16)
-    sns.histplot(
-        masses_reco - masses_orig,
-        bins=50,
-        color="blue",
-        alpha=0.5,
-        label="Original",
-        kde=False,
-        stat="density",
-        ax=axs[1],
-    )
-    axs[0].set_xscale("log")
-    axs[0].set_title(f"mass (assume. m_0 = 0) (MSE: {mse_per_feature[2]:.4f})")
-    axs[0].legend()
 
-    plt.tight_layout()
+def _plot_ratio_histogram(
+    ax,
+    bins,
+    numerator,
+    denominator,
+    label=None,
+    color=RECONSTRUCTED_COLOR,
+):
+    ratio = np.divide(
+        numerator,
+        denominator,
+        out=np.full_like(numerator, np.nan, dtype=float),
+        where=denominator > 0,
+    )
+    _plot_single_histogram(ax, bins, ratio, label=label, color=color)
+
+
+def _triplet_axes(fig, ratio_indices=(0,)):
+    grid = fig.add_gridspec(
+        2,
+        3,
+        height_ratios=RATIO_HEIGHT_RATIOS,
+        hspace=RATIO_HSPACE,
+        wspace=RATIO_WSPACE,
+    )
+    axes = []
+    ratio_axes = {}
+    for i in range(3):
+        if i in ratio_indices:
+            axis = fig.add_subplot(grid[0, i])
+            ratio_axes[i] = fig.add_subplot(grid[1, i], sharex=axis)
+        else:
+            axis = fig.add_subplot(grid[:, i])
+        axes.append(axis)
+    return axes, ratio_axes
+
+
+def _pair_axes(fig, with_first_ratio=False):
+    if not with_first_ratio:
+        return fig.subplots(1, 2), {}
+
+    grid = fig.add_gridspec(
+        2,
+        2,
+        height_ratios=RATIO_HEIGHT_RATIOS,
+        hspace=RATIO_HSPACE,
+        wspace=RATIO_WSPACE,
+    )
+    axes = [
+        fig.add_subplot(grid[0, 0]),
+        fig.add_subplot(grid[:, 1]),
+    ]
+    return axes, {0: fig.add_subplot(grid[1, 0], sharex=axes[0])}
+
+
+def _configure_ratio_axis(ax, xlabel):
+    ax.axhline(
+        1.0,
+        color=REFERENCE_LINE_COLOR,
+        linestyle=REFERENCE_LINE_STYLE,
+        alpha=REFERENCE_LINE_ALPHA,
+    )
+    ax.set_ylim(*RATIO_YLIM)
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel("Reco / orig")
+
+
+def _adjust_ratio_layout(fig):
+    fig.subplots_adjust(left=0.06, right=0.98, bottom=0.12, top=0.88)
+
+
+def _validate_data_level(data_level):
+    if data_level not in ("particle", "jet"):
+        raise ValueError(f"Unsupported data level: {data_level}")
+
+
+def _clean_feature_name(feature_name):
+    return feature_name.replace(" ", "_")
+
+
+def collect_reconstruction_histograms(
+    feature_names,
+    x_np,
+    x_hat_np,
+    true_jet_pts=(),
+    reco_jet_pts=(),
+    true_jet_masses=(),
+    reco_jet_masses=(),
+    true_tau32s=(),
+    reco_tau32s=(),
+    data_level="particle",
+):
+    _validate_data_level(data_level)
+    histograms = {}
+
+    if len(true_jet_pts) > 0:
+        true_jet_pts = np.asarray(true_jet_pts)
+        reco_jet_pts = np.asarray(reco_jet_pts)
+        fractional_diff = (reco_jet_pts - true_jet_pts) / (true_jet_pts + 1e-8)
+        counts, bins = np.histogram(fractional_diff, bins=50, range=(-0.5, 0.5))
+        histograms["jet_pt_resolution_counts"] = counts
+        histograms["jet_pt_resolution_bins"] = bins
+
+    for i, feature_name in enumerate(feature_names):
+        min_val = min(x_np[:, i].min(), x_hat_np[:, i].min())
+        max_val = max(x_np[:, i].max(), x_hat_np[:, i].max())
+        if i == 2:
+            min_val = max(min_val, 1e-8)
+            bins = np.logspace(np.log10(min_val), np.log10(max_val), 50)
+        else:
+            bins = np.linspace(min_val, max_val, 50)
+
+        clean_name = _clean_feature_name(feature_name)
+        histograms[f"{clean_name}_orig_counts"] = np.histogram(
+            x_np[:, i], bins=bins, density=True
+        )[0]
+        histograms[f"{clean_name}_reco_counts"] = np.histogram(
+            x_hat_np[:, i], bins=bins, density=True
+        )[0]
+        histograms[f"{clean_name}_bins"] = bins
+
+    energy_orig = x_np[:, 2] * np.cosh(x_np[:, 0])
+    energy_reco = x_hat_np[:, 2] * np.cosh(x_hat_np[:, 0])
+    min_val = max(min(energy_orig.min(), energy_reco.min()), 1e-8)
+    max_val = max(energy_orig.max(), energy_reco.max())
+    energy_bins = np.logspace(np.log10(min_val), np.log10(max_val), num=50)
+    histograms["energy_orig_counts"] = np.histogram(
+        energy_orig, bins=energy_bins, density=True
+    )[0]
+    histograms["energy_reco_counts"] = np.histogram(
+        energy_reco, bins=energy_bins, density=True
+    )[0]
+    histograms["energy_bins"] = energy_bins
+    histograms["energy_residuals_counts"], histograms["energy_residuals_bins"] = (
+        np.histogram(energy_reco - energy_orig, bins=50, density=True)
+    )
+
+    # Tau32 and reconstructed fat-jet mass are available only when clustering particles.
+    if data_level == "particle" and len(true_jet_masses) > 0:
+        true_jet_masses = np.asarray(true_jet_masses)
+        reco_jet_masses = np.asarray(reco_jet_masses)
+        true_tau32s = np.asarray(true_tau32s)
+        reco_tau32s = np.asarray(reco_tau32s)
+
+        mass_bins = np.linspace(0, 600, 50)
+        histograms["jet_mass_orig_counts"] = np.histogram(
+            true_jet_masses, bins=mass_bins, density=True
+        )[0]
+        histograms["jet_mass_reco_counts"] = np.histogram(
+            reco_jet_masses, bins=mass_bins, density=True
+        )[0]
+        histograms["jet_mass_bins"] = mass_bins
+
+        mass_diff_bins = np.linspace(-50, 50, 50)
+        histograms["jet_mass_diff_counts"] = np.histogram(
+            reco_jet_masses - true_jet_masses, bins=mass_diff_bins, density=True
+        )[0]
+        histograms["jet_mass_diff_bins"] = mass_diff_bins
+
+        tau_diff_bins = np.linspace(-0.4, 0.4, 50)
+        histograms["tau32_diff_counts"] = np.histogram(
+            reco_tau32s - true_tau32s, bins=tau_diff_bins, density=True
+        )[0]
+        histograms["tau32_diff_bins"] = tau_diff_bins
+
+    return histograms
+
+
+def plot_residual_histogram(
+    ax,
+    bins,
+    series,
+    xlabel,
+    title=None,
+    ylabel="Density",
+):
+    for counts, label, color in series:
+        _plot_single_histogram(ax, bins, counts, label=label, color=color)
+    ax.axvline(
+        0,
+        color=REFERENCE_LINE_COLOR,
+        linestyle=REFERENCE_LINE_STYLE,
+        alpha=REFERENCE_LINE_ALPHA,
+    )
+    if title:
+        _set_title(ax, title)
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel(ylabel)
+    if any(label for _, label, _ in series):
+        ax.legend(prop={"size": 10})
+
+
+def _single_run_residual_series(counts):
+    return [(counts, None, RESIDUAL_COLOR)]
+
+
+def plot_feature_histograms(
+    histograms,
+    feature_names,
+    reconstructed_series=None,
+    mse_per_feature=None,
+    include_all_ratios=False,
+    title="Original vs. Reconstructed Features",
+):
+    single_run = reconstructed_series is None
+    reconstructed_series = reconstructed_series or [
+        (histograms, "Reconstructed", RECONSTRUCTED_COLOR)
+    ]
+    fig = plt.figure(figsize=FEATURE_FIGSIZE)
+    ratio_indices = (0, 1, 2) if include_all_ratios else (0,)
+    axes, ratio_axes = _triplet_axes(fig, ratio_indices=ratio_indices)
+    _set_suptitle(fig, title, fontsize=16)
+
+    for axis_idx, feature_idx in enumerate((2, 0, 1)):
+        axis = axes[axis_idx]
+        feature_name = feature_names[feature_idx]
+        clean_name = _clean_feature_name(feature_name)
+        bins = histograms[f"{clean_name}_bins"]
+        if single_run:
+            _plot_original_reconstructed_histograms(
+                axis,
+                bins,
+                histograms[f"{clean_name}_orig_counts"],
+                histograms[f"{clean_name}_reco_counts"],
+            )
+        else:
+            _plot_filled_histogram(
+                axis,
+                bins,
+                histograms[f"{clean_name}_orig_counts"],
+                label="Original (Truth)",
+                color=TRUTH_REFERENCE_COLOR,
+                alpha=TRUTH_REFERENCE_FILL_ALPHA,
+            )
+        for data, label, color in reconstructed_series:
+            if not single_run:
+                _plot_single_histogram(
+                    axis,
+                    bins,
+                    data[f"{clean_name}_reco_counts"],
+                    label=label,
+                    color=color,
+                )
+            if axis_idx in ratio_axes:
+                _plot_ratio_histogram(
+                    ratio_axes[axis_idx],
+                    bins,
+                    data[f"{clean_name}_reco_counts"],
+                    histograms[f"{clean_name}_orig_counts"],
+                    label=label,
+                    color=color,
+                )
+
+        metric = ""
+        if mse_per_feature is not None:
+            metric = f" (MSE: {mse_per_feature[feature_idx]:.4f})"
+        _set_title(axis, f"{feature_name}{metric}")
+        axis.set_xlabel(feature_name)
+        axis.set_ylabel("Density")
+        axis.legend(prop={"size": 10})
+        if feature_idx == 2:
+            axis.set_xscale("log")
+        if axis_idx in ratio_axes:
+            _configure_ratio_axis(ratio_axes[axis_idx], xlabel=feature_name)
+            axis.tick_params(labelbottom=False)
+
+    _adjust_ratio_layout(fig)
     return fig
 
 
-def add_reconstruction_plots(
-    results,
+def plot_energy_histograms(
+    histograms,
+    reconstructed_series=None,
+    include_ratio=False,
+    title="Original vs. Reconstructed Energy (m=0)",
+):
+    single_run = reconstructed_series is None
+    reconstructed_series = reconstructed_series or [
+        (histograms, "Reconstructed", RECONSTRUCTED_COLOR)
+    ]
+    fig = plt.figure(figsize=ENERGY_FIGSIZE)
+    axes, ratio_axes = _pair_axes(fig, with_first_ratio=include_ratio)
+    bins = histograms["energy_bins"]
+    if single_run:
+        _plot_original_reconstructed_histograms(
+            axes[0],
+            bins,
+            histograms["energy_orig_counts"],
+            histograms["energy_reco_counts"],
+        )
+    else:
+        _plot_filled_histogram(
+            axes[0],
+            bins,
+            histograms["energy_orig_counts"],
+            label="Original (Truth)",
+            color=TRUTH_REFERENCE_COLOR,
+            alpha=TRUTH_REFERENCE_FILL_ALPHA,
+        )
+    for data, label, color in reconstructed_series:
+        if not single_run:
+            _plot_single_histogram(
+                axes[0], bins, data["energy_reco_counts"], label=label, color=color
+            )
+        if include_ratio:
+            _plot_ratio_histogram(
+                ratio_axes[0],
+                bins,
+                data["energy_reco_counts"],
+                histograms["energy_orig_counts"],
+                label=label,
+                color=color,
+            )
+    axes[0].set_xscale("log")
+    _set_title(axes[0], title)
+    axes[0].set_xlabel("Energy [GeV]")
+    axes[0].set_ylabel("Density")
+    axes[0].legend(prop={"size": 10})
+    if include_ratio:
+        _configure_ratio_axis(ratio_axes[0], xlabel="Energy [GeV]")
+        axes[0].tick_params(labelbottom=False)
+
+    residual_series = (
+        _single_run_residual_series(histograms["energy_residuals_counts"])
+        if single_run
+        else [
+            (data["energy_residuals_counts"], label, color)
+            for data, label, color in reconstructed_series
+        ]
+    )
+    plot_residual_histogram(
+        axes[1],
+        histograms["energy_residuals_bins"],
+        residual_series,
+        xlabel=r"$E^{reco} - E^{orig}$ [GeV]",
+        title=r"Energy Residuals: $E^{reco} - E^{orig}$",
+    )
+    if include_ratio:
+        _adjust_ratio_layout(fig)
+    else:
+        plt.tight_layout()
+    return fig
+
+
+# =============================================================================
+# Single-run reconstruction plots
+# =============================================================================
+
+
+def exploratory_feature_histograms(
+    x_np,
+    x_hat_np,
+    mse_per_feature,
+    feature_names,
+    include_all_ratios=False,
+    data_level="particle",
+):
+    mh.style.use(mh.style.ROOT)
+    histograms = collect_reconstruction_histograms(
+        feature_names, x_np, x_hat_np, data_level=data_level
+    )
+    return plot_feature_histograms(
+        histograms,
+        feature_names,
+        mse_per_feature=mse_per_feature,
+        include_all_ratios=include_all_ratios,
+        title=f"{data_level.capitalize()} Features: Original vs. Reconstructed",
+    )
+
+
+def exploratory_energy_histograms(
+    x_np,
+    x_hat_np,
+    mse_per_feature,
+    include_all_ratios=False,
+    data_level="particle",
+):
+    mh.style.use(mh.style.ROOT)
+    histograms = collect_reconstruction_histograms(
+        ["Eta", "Phi", "pT"], x_np, x_hat_np, data_level=data_level
+    )
+    return plot_energy_histograms(
+        histograms,
+        include_ratio=include_all_ratios,
+        title=f"{data_level.capitalize()} Energy: Original vs. Reconstructed (m=0)",
+    )
+
+
+def reconstruction_plots(
     feature_names,
     mse_per_feature,
     x_np,
@@ -101,177 +524,115 @@ def add_reconstruction_plots(
     reco_jet_masses,
     true_tau32s,
     reco_tau32s,
+    include_all_ratios=False,
+    data_level="particle",
+    histograms=None,
 ):
     mh.style.use(mh.style.ROOT)
+    _validate_data_level(data_level)
+    if histograms is None:
+        histograms = collect_reconstruction_histograms(
+            feature_names,
+            x_np,
+            x_hat_np,
+            true_jet_pts,
+            reco_jet_pts,
+            true_jet_masses,
+            reco_jet_masses,
+            true_tau32s,
+            reco_tau32s,
+            data_level=data_level,
+        )
+    figures = {}
 
-    if len(true_jet_pts) > 0:
-        true_jet_pts = np.array(true_jet_pts)
-        reco_jet_pts = np.array(reco_jet_pts)
-
-        fig, ax = plt.subplots(figsize=(8, 6))
-        fractional_diff = (reco_jet_pts - true_jet_pts) / (true_jet_pts + 1e-8)
-        counts, bins = np.histogram(fractional_diff, bins=50, range=(-0.5, 0.5))
-
-        results["histograms/jet_pt_resolution_counts"] = counts
-        results["histograms/jet_pt_resolution_bins"] = bins
-
-        mh.histplot(counts, bins=bins, ax=ax, histtype="step", color="indigo", linewidth=2)
-
-        ax.axvline(0, color="black", linestyle="--", alpha=0.5)
+    if "jet_pt_resolution_counts" in histograms:
+        fig, ax = plt.subplots(figsize=RESOLUTION_FIGSIZE)
+        _plot_single_histogram(
+            ax,
+            histograms["jet_pt_resolution_bins"],
+            histograms["jet_pt_resolution_counts"],
+        )
+        ax.axvline(
+            0,
+            color=REFERENCE_LINE_COLOR,
+            linestyle=REFERENCE_LINE_STYLE,
+            alpha=REFERENCE_LINE_ALPHA,
+        )
         ax.set_xlabel(r"Fractional $p_T$ Resolution: $(p_T^{reco} - p_T^{true}) / p_T^{true}$")
         ax.set_ylabel("Number of Jets")
-        ax.set_title("Jet Transverse Momentum Recovery")
+        _set_title(ax, "Jet Transverse Momentum Recovery")
+        figures["jet_pt_resolution"] = fig
 
-        results["plots/jet_pt_resolution"] = fig
-
-    fig1, axes = plt.subplots(1, 3, figsize=(18, 8))
-    fig1.suptitle("FSQ-VAE: Original vs. Reconstructed Features (per-particle)", fontsize=16)
-
-    for i in range(3):
-        feature_name = feature_names[i].replace(" ", "_")
-
-        min_val = min(x_np[:, i].min(), x_hat_np[:, i].min())
-        max_val = max(x_np[:, i].max(), x_hat_np[:, i].max())
-
-        if i == 2:
-            min_val = max(min_val, 1e-8)
-            bins = np.logspace(np.log10(min_val), np.log10(max_val), 50)
-            axes[i].set_xscale("log")
-        else:
-            bins = np.linspace(min_val, max_val, 50)
-
-        counts_orig, _ = np.histogram(x_np[:, i], bins=bins, density=True)
-        counts_reco, _ = np.histogram(x_hat_np[:, i], bins=bins, density=True)
-
-        results[f"histograms/{feature_name}_orig_counts"] = counts_orig
-        results[f"histograms/{feature_name}_reco_counts"] = counts_reco
-        results[f"histograms/{feature_name}_bins"] = bins
-
-        mh.histplot(
-            [counts_orig, counts_reco],
-            bins=bins,
-            ax=axes[i],
-            label=["Original", "Reconstructed"],
-            color=["blue", "orange"],
-            histtype="fill",
-            alpha=0.5,
-            edgecolor=["blue", "orange"],
-        )
-
-        axes[i].set_title(f"{feature_names[i]} (MSE: {mse_per_feature[i]:.4f})")
-        axes[i].set_ylabel("Density")
-        axes[i].legend()
-
-    plt.tight_layout()
-    results["plots/kinematics"] = fig1
-
-    fig2, axs = plt.subplots(1, 2, figsize=(16, 5))
-
-    pt_orig = x_np[:, 2]
-    pt_reco = x_hat_np[:, 2]
-
-    energy_orig = pt_orig * np.cosh(x_np[:, 0])
-    energy_reco = pt_reco * np.cosh(x_hat_np[:, 0])
-
-    min_val = max(min(energy_orig.min(), energy_reco.min()), 1e-8)
-    max_val = max(energy_orig.max(), energy_reco.max())
-    log_bins = np.logspace(np.log10(min_val), np.log10(max_val), num=50)
-
-    counts_e_orig, _ = np.histogram(energy_orig, bins=log_bins, density=True)
-    counts_e_reco, _ = np.histogram(energy_reco, bins=log_bins, density=True)
-
-    results["histograms/energy_orig_counts"] = counts_e_orig
-    results["histograms/energy_reco_counts"] = counts_e_reco
-    results["histograms/energy_bins"] = log_bins
-
-    axs[0].set_title("FSQ-VAE: Original vs. Reconstructed Energy (m=0)", fontsize=14)
-    mh.histplot(
-        [counts_e_orig, counts_e_reco],
-        bins=log_bins,
-        ax=axs[0],
-        label=["Original", "Reconstructed"],
-        color=["blue", "orange"],
-        histtype="fill",
-        alpha=0.5,
-        edgecolor=["blue", "orange"],
+    figures["kinematics"] = plot_feature_histograms(
+        histograms,
+        feature_names,
+        mse_per_feature=mse_per_feature,
+        include_all_ratios=include_all_ratios,
+        title=f"{data_level.capitalize()} Kinematics: Original vs. Reconstructed",
     )
-    axs[0].set_xscale("log")
-    axs[0].set_ylabel("Density")
-    axs[0].legend()
+    figures["energy_residuals"] = plot_energy_histograms(
+        histograms,
+        include_ratio=include_all_ratios,
+        title=f"{data_level.capitalize()} Energy: Original vs. Reconstructed (m=0)",
+    )
 
-    energy_mse = np.mean((energy_reco - energy_orig) ** 2)
-    res_counts, res_bins = np.histogram(energy_reco - energy_orig, bins=50, density=True)
+    if data_level == "particle" and "jet_mass_orig_counts" in histograms:
+        if include_all_ratios:
+            fig3 = plt.figure(figsize=SUBSTRUCTURE_FIGSIZE)
+            axs3, ratio_axes = _triplet_axes(fig3, ratio_indices=(0,))
+        else:
+            fig3, axs3 = plt.subplots(1, 3, figsize=SUBSTRUCTURE_SIMPLE_FIGSIZE)
+            ratio_axes = {}
+        _set_suptitle(fig3, "FSQ-VAE: Jet Substructure", fontsize=16)
 
-    results["histograms/energy_residuals_counts"] = res_counts
-    results["histograms/energy_residuals_bins"] = res_bins
-
-    axs[1].set_title(f"Residuals: E_reco - E_original (MSE: {energy_mse:.2f})", fontsize=14)
-    mh.histplot(res_counts, bins=res_bins, ax=axs[1], color="green", histtype="fill", alpha=0.5, edgecolor="green")
-    axs[1].set_ylabel("Density")
-
-    plt.tight_layout()
-    results["plots/energy_residuals"] = fig2
-
-    if len(true_jet_masses) > 0:
-        fig3, axs3 = plt.subplots(1, 3, figsize=(18, 8))
-        fig3.suptitle("FSQ-VAE: Jet Substructure", fontsize=16)
-
-        true_jet_masses = np.array(true_jet_masses)
-        reco_jet_masses = np.array(reco_jet_masses)
-        true_tau32s = np.array(true_tau32s)
-        reco_tau32s = np.array(reco_tau32s)
-
-        mass_bins = np.linspace(0, 600, 50)
-
-        counts_m_orig, _ = np.histogram(true_jet_masses, bins=mass_bins, density=True)
-        counts_m_reco, _ = np.histogram(reco_jet_masses, bins=mass_bins, density=True)
-
-        results["histograms/jet_mass_orig_counts"] = counts_m_orig
-        results["histograms/jet_mass_reco_counts"] = counts_m_reco
-        results["histograms/jet_mass_bins"] = mass_bins
-
-        mh.histplot(
-            [counts_m_orig, counts_m_reco],
-            bins=mass_bins,
-            ax=axs3[0],
-            label=["Original", "Reconstructed"],
-            color=["blue", "orange"],
-            histtype="fill",
-            alpha=0.5,
-            edgecolor=["blue", "orange"],
+        _plot_original_reconstructed_histograms(
+            axs3[0],
+            histograms["jet_mass_bins"],
+            histograms["jet_mass_orig_counts"],
+            histograms["jet_mass_reco_counts"],
         )
+        _set_title(axs3[0], "Jet Mass")
         axs3[0].set_xlabel("Jet Mass [GeV]")
         axs3[0].set_ylabel("Density")
         axs3[0].legend()
+        if include_all_ratios:
+            ratio_ax = ratio_axes[0]
+            _plot_ratio_histogram(
+                ratio_ax,
+                histograms["jet_mass_bins"],
+                histograms["jet_mass_reco_counts"],
+                histograms["jet_mass_orig_counts"],
+            )
+            _configure_ratio_axis(ratio_ax, xlabel="Jet Mass [GeV]")
+            axs3[0].tick_params(labelbottom=False)
 
-        mass_diff = reco_jet_masses - true_jet_masses
-        diff_bins = np.linspace(-50, 50, 50)
+        plot_residual_histogram(
+            axs3[1],
+            histograms["jet_mass_diff_bins"],
+            _single_run_residual_series(histograms["jet_mass_diff_counts"]),
+            xlabel=r"$m^{reco} - m^{orig}$ [GeV]",
+            title="Jet Mass Residuals",
+        )
+        plot_residual_histogram(
+            axs3[2],
+            histograms["tau32_diff_bins"],
+            _single_run_residual_series(histograms["tau32_diff_counts"]),
+            xlabel=r"$\tau_{32}^{reco} - \tau_{32}^{orig}$",
+            title=r"$\tau_{32}$ Residuals",
+        )
 
-        counts_mdiff, _ = np.histogram(mass_diff, bins=diff_bins, density=True)
-        results["histograms/jet_mass_diff_counts"] = counts_mdiff
-        results["histograms/jet_mass_diff_bins"] = diff_bins
+        if include_all_ratios:
+            _adjust_ratio_layout(fig3)
+        else:
+            plt.tight_layout()
+        figures["jet_substructure"] = fig3
 
-        mh.histplot(counts_mdiff, bins=diff_bins, ax=axs3[1], histtype="fill", color="green", alpha=0.5, edgecolor="green")
-        axs3[1].axvline(0, color="black", linestyle="--", alpha=0.5)
-        axs3[1].set_xlabel(r"$m^{reco} - m^{orig}$ [GeV]")
-        axs3[1].set_ylabel("Density")
+    return figures
 
-        tau_diff = reco_tau32s - true_tau32s
-        tau_bins = np.linspace(-0.4, 0.4, 50)
 
-        counts_tdiff, _ = np.histogram(tau_diff, bins=tau_bins, density=True)
-        results["histograms/tau32_diff_counts"] = counts_tdiff
-        results["histograms/tau32_diff_bins"] = tau_bins
-
-        mh.histplot(counts_tdiff, bins=tau_bins, ax=axs3[2], histtype="fill", color="purple", alpha=0.5, edgecolor="purple")
-        axs3[2].axvline(0, color="black", linestyle="--", alpha=0.5)
-        axs3[2].set_xlabel(r"$\tau_{32}^{reco} - \tau_{32}^{orig}$")
-        axs3[2].set_ylabel("Density")
-
-        plt.tight_layout()
-        results["plots/jet_substructure"] = fig3
-
-    return results
+# =============================================================================
+# Single-run attention diagnostic plots
+# =============================================================================
 
 
 def attention_delta_eta_phi_figure(weights, x, valid, title, exclude_self=False):
@@ -314,14 +675,14 @@ def attention_delta_eta_phi_figure(weights, x, valid, title, exclude_self=False)
         where=pair_count > 0,
     )
 
-    fig, ax = plt.subplots(figsize=(6, 5))
+    fig, ax = plt.subplots(figsize=ATTENTION_DELTA_FIGSIZE)
     im = ax.imshow(
         hist.T,
         origin="lower",
         extent=[eta_edges[0], eta_edges[-1], phi_edges[0], phi_edges[-1]],
         aspect="auto",
     )
-    ax.set_title(title)
+    _set_title(ax, title)
     ax.set_xlabel(r"$\Delta\eta = \eta_\mathrm{query} - \eta_\mathrm{key}$")
     ax.set_ylabel(r"$\Delta\phi = \phi_\mathrm{query} - \phi_\mathrm{key}$")
     fig.colorbar(im, ax=ax, label="mean attention weight per pair")
@@ -329,9 +690,9 @@ def attention_delta_eta_phi_figure(weights, x, valid, title, exclude_self=False)
 
 
 def attention_map_figure(matrix, title):
-    fig, ax = plt.subplots(figsize=(5, 4))
+    fig, ax = plt.subplots(figsize=ATTENTION_MAP_FIGSIZE)
     im = ax.imshow(matrix, vmin=0.0, vmax=max(float(matrix.max()), 1e-6), aspect="auto")
-    ax.set_title(title)
+    _set_title(ax, title)
     ax.set_xlabel("key particle")
     ax.set_ylabel("query particle")
     fig.colorbar(im, ax=ax)
@@ -344,6 +705,11 @@ def close_figure(fig):
 
 def show_figure():
     plt.show()
+
+
+# =============================================================================
+# Multi-run comparison plots
+# =============================================================================
 
 
 def _clean_metric_name(metric):
@@ -363,80 +729,97 @@ def _codebook_family(record):
     return None
 
 
+def _codebook_family_styles():
+    return (
+        CODEBOOK_FAMILY_COLORS,
+        CODEBOOK_FAMILY_MARKERS,
+        CODEBOOK_FAMILY_LABELS,
+    )
+
+
+def plot_scatter_figure(
+    records,
+    y_value,
+    x_value,
+    x_label,
+    y_label,
+    title,
+    family_fn=None,
+    family_colors=None,
+    family_markers=None,
+    family_labels=None,
+    log_x=False,
+    log_y=False,
+):
+    colors = RUN_COLORS
+    markers = SCATTER_MARKERS
+    family_colors = family_colors or {}
+    family_markers = family_markers or {}
+    family_labels = family_labels or {}
+    family_fn = family_fn or (lambda record: None)
+
+    fig, ax = plt.subplots(figsize=SCATTER_FIGSIZE)
+    present_families = []
+    for family in family_labels:
+        family_records = [record for record in records if family_fn(record) == family]
+        if family_records:
+            present_families.append(family)
+        if len(family_records) < 2:
+            continue
+        family_records = sorted(family_records, key=x_value)
+        ax.plot(
+            [x_value(record) for record in family_records],
+            [y_value(record) for record in family_records],
+            color=family_colors[family],
+            alpha=SCATTER_LINE_ALPHA,
+            linewidth=SCATTER_LINEWIDTH,
+            zorder=1,
+        )
+
+    for i, record in enumerate(records):
+        family = family_fn(record)
+        ax.scatter(
+            x_value(record),
+            y_value(record),
+            color=family_colors.get(family, colors[i % len(colors)]),
+            marker=family_markers.get(family, markers[i % len(markers)]),
+            alpha=SCATTER_POINT_ALPHA,
+            s=45,
+            zorder=2,
+        )
+
+    if log_x:
+        ax.set_xscale("log")
+    if log_y:
+        ax.set_yscale("log")
+    ax.set_xlabel(x_label)
+    ax.set_ylabel(y_label)
+    _set_title(ax, title)
+    family_handles = [
+        Line2D(
+            [0],
+            [0],
+            color=family_colors[family],
+            marker=family_markers[family],
+            linewidth=SCATTER_LINEWIDTH,
+            markersize=7,
+            label=family_labels[family],
+        )
+        for family in present_families
+    ]
+    if family_handles:
+        ax.legend(handles=family_handles, prop={"size": 9})
+    plt.tight_layout()
+    return fig
+
+
 def plot_codebook_error_scatter(records, y_metrics):
     mh.style.use(mh.style.ROOT)
 
-    colors = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b"]
-    family_colors = {
-        "fsq": "#1f77b4",
-        "vq_ste": "#ff7f0e",
-        "vq_rotation": "#2ca02c",
-    }
-    family_markers = {
-        "fsq": "o",
-        "vq_ste": "s",
-        "vq_rotation": "^",
-    }
-    family_labels = {
-        "fsq": "FSQ",
-        "vq_ste": "VQ STE",
-        "vq_rotation": "VQ rotation",
-    }
-    markers = ["o", "s", "^", "D", "v", "P", "X", "*", "<", ">", "h", "8", "p", "H"]
+    family_colors, family_markers, family_labels = _codebook_family_styles()
     figures = {}
 
-    def add_scatter_figure(metric_records, metric, x_value, x_label, title, filename, log_x=False):
-        fig, ax = plt.subplots(figsize=(8, 6))
-        family_handles = []
-
-        for family, family_label in family_labels.items():
-            family_records = [
-                record for record in metric_records if _codebook_family(record) == family
-            ]
-            if len(family_records) < 2:
-                continue
-            family_records = sorted(family_records, key=x_value)
-            (line,) = ax.plot(
-                [x_value(record) for record in family_records],
-                [record[metric] for record in family_records],
-                color=family_colors[family],
-                alpha=0.55,
-                linewidth=1.5,
-                label=family_label,
-                zorder=1,
-            )
-            family_handles.append(line)
-
-        for i, record in enumerate(metric_records):
-            family = _codebook_family(record)
-            ax.scatter(
-                x_value(record),
-                record[metric],
-                color=family_colors.get(family, colors[i % len(colors)]),
-                marker=family_markers.get(family, markers[i % len(markers)]),
-                alpha=0.8,
-                s=45,
-                label=record.get("label", record.get("run_name", f"run_{i}")),
-                zorder=2,
-            )
-
-        if log_x:
-            ax.set_xscale("log")
-        ax.set_yscale("log")
-        ax.set_xlabel(x_label)
-        ax.set_ylabel(metric.replace("metrics/", ""))
-        ax.set_title(title)
-
-        handles, labels = ax.get_legend_handles_labels()
-        if len(labels) <= 12:
-            ax.legend(prop={"size": 8})
-        elif family_handles:
-            ax.legend(handles=family_handles, prop={"size": 8})
-
-        plt.tight_layout()
-        figures[filename] = fig
-
-    for metric_idx, metric in enumerate(y_metrics):
+    for metric in y_metrics:
         metric_records = [
             record
             for record in records
@@ -450,28 +833,83 @@ def plot_codebook_error_scatter(records, y_metrics):
         metric_name = metric.replace("metrics/", "")
         clean_metric_name = _clean_metric_name(metric)
 
-        add_scatter_figure(
-            metric_records=metric_records,
-            metric=metric,
+        figures[f"codebook_size_vs_{clean_metric_name}.png"] = plot_scatter_figure(
+            records=metric_records,
+            y_value=lambda record, metric=metric: record[metric],
             x_value=lambda record: record["total_codebook_size"],
             x_label="Total codebook size",
+            y_label=metric_name,
             title=f"Codebook size vs. {metric_name}",
-            filename=f"codebook_size_vs_{clean_metric_name}.png",
+            family_fn=_codebook_family,
+            family_colors=family_colors,
+            family_markers=family_markers,
+            family_labels=family_labels,
             log_x=True,
+            log_y=True,
         )
-        add_scatter_figure(
-            metric_records=metric_records,
-            metric=metric,
+        figures[f"codebook_bits_vs_{clean_metric_name}.png"] = plot_scatter_figure(
+            records=metric_records,
+            y_value=lambda record, metric=metric: record[metric],
             x_value=lambda record: math.ceil(math.log2(record["total_codebook_size"])),
             x_label="Bits required to represent codebook",
+            y_label=metric_name,
             title=f"Codebook bits vs. {metric_name}",
-            filename=f"codebook_bits_vs_{clean_metric_name}.png",
+            family_fn=_codebook_family,
+            family_colors=family_colors,
+            family_markers=family_markers,
+            family_labels=family_labels,
+            log_y=True,
         )
 
     return figures
 
 
-def replot_jet_structure(runs_data, run_labels):
+def plot_codebook_utilization_scatter(records):
+    mh.style.use(mh.style.ROOT)
+
+    figures = {}
+    family_colors, family_markers, family_labels = _codebook_family_styles()
+    metrics = (
+        ("metrics/utilization_mu", "Mu codebook utilization"),
+        ("metrics/utilization_alpha", "Alpha codebook utilization"),
+        ("metrics/utilization_combined", "Combined codebook utilization"),
+    )
+    for metric, label in metrics:
+        metric_records = [
+            record
+            for record in records
+            if record.get(metric) is not None
+            and record.get("total_codebook_size") is not None
+        ]
+        if not metric_records:
+            continue
+        clean_metric_name = _clean_metric_name(metric)
+        figures[f"codebook_size_vs_{clean_metric_name}.png"] = plot_scatter_figure(
+            records=metric_records,
+            x_value=lambda record: record["total_codebook_size"],
+            y_value=lambda record, metric=metric: record[metric],
+            x_label="Total codebook size",
+            y_label=label,
+            title=f"Codebook size vs. {label.lower()}",
+            family_fn=_codebook_family,
+            family_colors=family_colors,
+            family_markers=family_markers,
+            family_labels=family_labels,
+            log_x=True,
+        )
+        figures[f"codebook_size_vs_{clean_metric_name}.png"].axes[0].set_ylim(
+            *UTILIZATION_YLIM
+        )
+
+    return figures
+
+
+def replot_reconstruction_comparison(
+    runs_data,
+    run_labels,
+    include_all_ratios=False,
+    data_level="particle",
+):
     """
     Plots superimposed reconstruction histograms for multiple runs.
     
@@ -480,10 +918,11 @@ def replot_jet_structure(runs_data, run_labels):
         run_labels (list of str): Legend labels for each run (e.g., ["FSQ 10", "FSQ 21"]).
     """
     mh.style.use(mh.style.ROOT)
+    _validate_data_level(data_level)
     figures = {}
     
     # Define distinct colors for the different runs
-    colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b']
+    colors = RUN_COLORS
     
     # We can extract the bins and the "Original" truth from the very first run
     # (since the test set and bins are constant across all runs)
@@ -492,154 +931,120 @@ def replot_jet_structure(runs_data, run_labels):
     # ==========================================
     # 1. Jet pT Resolution
     # ==========================================
-    fig_pt_res, ax_pt_res = plt.subplots(figsize=(8, 6))
+    fig_pt_res, ax_pt_res = plt.subplots(figsize=RESOLUTION_FIGSIZE)
     bins_pt_res = ref_data["jet_pt_resolution_bins"]
     
     for i, data in enumerate(runs_data):
-        mh.histplot(
-            data["jet_pt_resolution_counts"], 
-            bins=bins_pt_res, 
-            ax=ax_pt_res, 
-            label=run_labels[i], 
-            histtype='step', 
-            color=colors[i % len(colors)], 
-            linewidth=2
+        _plot_single_histogram(
+            ax_pt_res,
+            bins_pt_res,
+            data["jet_pt_resolution_counts"],
+            label=run_labels[i],
+            color=colors[i % len(colors)],
         )
         
-    ax_pt_res.axvline(0, color='black', linestyle='--', alpha=0.5)
+    ax_pt_res.axvline(
+        0,
+        color=REFERENCE_LINE_COLOR,
+        linestyle=REFERENCE_LINE_STYLE,
+        alpha=REFERENCE_LINE_ALPHA,
+    )
     ax_pt_res.set_xlabel(r"Fractional $p_T$ Resolution: $(p_T^{reco} - p_T^{true}) / p_T^{true}$")
     ax_pt_res.set_ylabel("Density / Number of Jets")
-    ax_pt_res.set_title("Jet Transverse Momentum Recovery")
+    _set_title(ax_pt_res, "Jet Transverse Momentum Recovery")
     ax_pt_res.legend(prop={'size': 10})
     figures["combined_jet_pt_resolution.png"] = fig_pt_res
 
-    # ==========================================
-    # 2. Kinematic Features (Eta, Phi, pT)
-    # ==========================================
-    fig_kin, axes_kin = plt.subplots(1, 3, figsize=(18, 6))
-    fig_kin.suptitle("Kinematics: Original vs. Reconstructed Sweeps", fontsize=16)
-
-    
-    # log plot for pt
-    axes_kin[2].set_yscale('log')
-    features = ["Eta", "Phi", "pT"]
-    for i, feat in enumerate(features):
-        bins = ref_data[f"{feat}_bins"]
-        
-        # Plot the Original Truth once (Filled Grey)
-        mh.histplot(
-            ref_data[f"{feat}_orig_counts"], 
-            bins=bins, ax=axes_kin[i], label="Original (Truth)", 
-            color="grey", histtype='fill', alpha=0.3
-        )
-        
-        # Overlay the Reconstructed runs
-        for j, data in enumerate(runs_data):
-            mh.histplot(
-                data[f"{feat}_reco_counts"], 
-                bins=bins, ax=axes_kin[i], label=f"{run_labels[j]}", 
-                color=colors[j % len(colors)], histtype='step', linewidth=2
-            )
-            
-        if feat == "pT":
-            axes_kin[i].set_xscale("log")
-            
-        axes_kin[i].set_title(f"{feat} Distribution")
-        axes_kin[i].set_ylabel("Density")
-        axes_kin[i].legend(prop={'size': 10})
-
-    plt.tight_layout()
-    figures["combined_kinematics.png"] = fig_kin
-
-    # ==========================================
-    # 3. Energy and Residuals
-    # ==========================================
-    fig_energy, axs_e = plt.subplots(1, 2, figsize=(16, 5))
-    
-    # 3.1 Energy Distribution
-    bins_e = ref_data["energy_bins"]
-    mh.histplot(
-        ref_data["energy_orig_counts"], bins=bins_e, ax=axs_e[0], 
-        label="Original (Truth)", color="grey", histtype='fill', alpha=0.3
+    reconstructed_series = [
+        (data, run_labels[i], colors[i % len(colors)])
+        for i, data in enumerate(runs_data)
+    ]
+    figures["combined_kinematics.png"] = plot_feature_histograms(
+        ref_data,
+        ["Eta", "Phi", "pT"],
+        reconstructed_series=reconstructed_series,
+        include_all_ratios=include_all_ratios,
+        title=f"{data_level.capitalize()} Kinematics: Reconstruction Sweeps",
     )
-    for j, data in enumerate(runs_data):
-        mh.histplot(
-            data["energy_reco_counts"], bins=bins_e, ax=axs_e[0], 
-            label=f"Reco ({run_labels[j]})", color=colors[j % len(colors)], 
-            histtype='step', linewidth=2
-        )
-    axs_e[0].set_title("Energy Distribution (m=0)")
-    axs_e[0].set_xscale("log")
-    axs_e[0].set_ylabel("Density")
-    axs_e[0].legend(prop={'size': 10})
-
-    # 3.2 Energy Residuals
-    bins_e_res = ref_data["energy_residuals_bins"]
-    for j, data in enumerate(runs_data):
-        mh.histplot(
-            data["energy_residuals_counts"], bins=bins_e_res, ax=axs_e[1], 
-            label=run_labels[j], color=colors[j % len(colors)], 
-            histtype='step', linewidth=2
-        )
-    axs_e[1].axvline(0, color='black', linestyle='--', alpha=0.5)
-    axs_e[1].set_title(r"Energy Residuals: $E^{reco} - E^{orig}$")
-    axs_e[1].set_ylabel("Density")
-    axs_e[1].legend(prop={'size': 10})
-
-    plt.tight_layout()
-    figures["combined_energy.png"] = fig_energy
+    figures["combined_energy.png"] = plot_energy_histograms(
+        ref_data,
+        reconstructed_series=reconstructed_series,
+        include_ratio=include_all_ratios,
+        title=f"{data_level.capitalize()} Energy: Reconstruction Sweeps (m=0)",
+    )
 
     # ==========================================
     # 4. Jet Substructure (Mass, Mass Diff, Tau32 Diff)
     # ==========================================
     # Check if substructure data exists (in case a run crashed before substructure or had N<3)
-    if "jet_mass_orig_counts" in ref_data:
-        fig_sub, axs_sub = plt.subplots(1, 3, figsize=(18, 5))
-        fig_sub.suptitle("Jet Substructure Sweep", fontsize=16)
+    if data_level == "particle" and "jet_mass_orig_counts" in ref_data:
+        fig_sub = plt.figure(figsize=SUBSTRUCTURE_COMPARISON_FIGSIZE)
+        axs_sub, ratio_axes = _triplet_axes(fig_sub, ratio_indices=(0,))
+        _set_suptitle(fig_sub, "Jet Substructure Sweep", fontsize=16)
 
         # 4.1 Jet Mass
         bins_mass = ref_data["jet_mass_bins"]
-        mh.histplot(
-            ref_data["jet_mass_orig_counts"], bins=bins_mass, ax=axs_sub[0], 
-            label="Original (Truth)", color="grey", histtype='fill', alpha=0.3
+        _plot_filled_histogram(
+            axs_sub[0],
+            bins_mass,
+            ref_data["jet_mass_orig_counts"],
+            label="Original (Truth)",
+            color=TRUTH_REFERENCE_COLOR,
+            alpha=TRUTH_REFERENCE_FILL_ALPHA,
         )
         for j, data in enumerate(runs_data):
-            mh.histplot(
-                data["jet_mass_reco_counts"], bins=bins_mass, ax=axs_sub[0], 
-                label=f"Reco ({run_labels[j]})", color=colors[j % len(colors)], 
-                histtype='step', linewidth=2
+            _plot_single_histogram(
+                axs_sub[0],
+                bins_mass,
+                data["jet_mass_reco_counts"],
+                label=f"Reco ({run_labels[j]})",
+                color=colors[j % len(colors)],
             )
+            _plot_ratio_histogram(
+                ratio_axes[0],
+                bins_mass,
+                data["jet_mass_reco_counts"],
+                ref_data["jet_mass_orig_counts"],
+                label=run_labels[j],
+                color=colors[j % len(colors)],
+            )
+        _configure_ratio_axis(ratio_axes[0], xlabel="Jet Mass [GeV]")
+        axs_sub[0].tick_params(labelbottom=False)
         axs_sub[0].set_xlabel("Jet Mass [GeV]")
         axs_sub[0].set_ylabel("Density")
         axs_sub[0].legend(prop={'size': 10})
 
         # 4.2 Jet Mass Difference
-        bins_mass_diff = ref_data["jet_mass_diff_bins"]
-        for j, data in enumerate(runs_data):
-            mh.histplot(
-                data["jet_mass_diff_counts"], bins=bins_mass_diff, ax=axs_sub[1], 
-                label=run_labels[j], color=colors[j % len(colors)], 
-                histtype='step', linewidth=2
-            )
-        axs_sub[1].axvline(0, color='black', linestyle='--', alpha=0.5)
-        axs_sub[1].set_xlabel(r"Jet $m^{reco} - m^{orig}$ [GeV]")
-        axs_sub[1].set_ylabel("Density")
-        axs_sub[1].legend(prop={'size': 10})
+        plot_residual_histogram(
+            axs_sub[1],
+            ref_data["jet_mass_diff_bins"],
+            [
+                (data["jet_mass_diff_counts"], run_labels[j], colors[j % len(colors)])
+                for j, data in enumerate(runs_data)
+            ],
+            xlabel=r"Jet $m^{reco} - m^{orig}$ [GeV]",
+        )
+        plot_residual_histogram(
+            axs_sub[2],
+            ref_data["tau32_diff_bins"],
+            [
+                (data["tau32_diff_counts"], run_labels[j], colors[j % len(colors)])
+                for j, data in enumerate(runs_data)
+            ],
+            xlabel=r"$\tau_{32}^{reco} - \tau_{32}^{orig}$",
+        )
 
-        # 4.3 Tau32 Difference
-        bins_tau_diff = ref_data["tau32_diff_bins"]
-        for j, data in enumerate(runs_data):
-            mh.histplot(
-                data["tau32_diff_counts"], bins=bins_tau_diff, ax=axs_sub[2], 
-                label=run_labels[j], color=colors[j % len(colors)], 
-                histtype='step', linewidth=2
-            )
-        axs_sub[2].axvline(0, color='black', linestyle='--', alpha=0.5)
-        axs_sub[2].set_xlabel(r"$\tau_{32}^{reco} - \tau_{32}^{orig}$")
-        axs_sub[2].set_ylabel("Density")
-        axs_sub[2].legend(prop={'size': 10})
-
-        plt.tight_layout()
+        _adjust_ratio_layout(fig_sub)
         figures["combined_substructure.png"] = fig_sub
 
     return figures
+
+
+def replot_jet_structure(runs_data, run_labels, include_all_ratios=False, data_level="particle"):
+    """Backward-compatible alias for replot_reconstruction_comparison."""
+    return replot_reconstruction_comparison(
+        runs_data,
+        run_labels,
+        include_all_ratios=include_all_ratios,
+        data_level=data_level,
+    )

@@ -12,7 +12,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 import wandb
 
-from .plotting import plot_codebook_error_scatter, replot_jet_structure
+from .plotting import (
+    plot_codebook_error_scatter,
+    plot_codebook_utilization_scatter,
+    replot_reconstruction_comparison,
+)
 from .train_eval import TrainPipeline
 
 
@@ -178,13 +182,18 @@ def collect_codebook_multirun(config):
         plot_codebook_error_scatter(records, y_metrics=y_metrics),
         comparison_dir,
     )
+    _save_figures(plot_codebook_utilization_scatter(records), comparison_dir)
 
     npz_files = [record["hist_path"] for record in records if record.get("hist_path")]
     run_labels = [f"{record['label']}, seed {record['seed']}" for record in records if record.get("hist_path")]
     if npz_files:
         runs_data = [_load_npz_dict(path) for path in npz_files]
         _save_figures(
-            replot_jet_structure(runs_data=runs_data, run_labels=run_labels),
+            replot_reconstruction_comparison(
+                runs_data=runs_data,
+                run_labels=run_labels,
+                data_level=config.get("data", {}).get("level", "particle"),
+            ),
             comparison_dir,
         )
 

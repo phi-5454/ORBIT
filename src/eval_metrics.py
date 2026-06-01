@@ -13,7 +13,7 @@ import torch.nn.functional as F
 import vector
 
 from .data_loading import PreprocessTranformer
-from .plotting import add_reconstruction_plots
+from .plotting import collect_reconstruction_histograms, reconstruction_plots
 
 _WORKER_JET_RECO = None
 
@@ -279,8 +279,19 @@ class PhysicsEvaluator:
             reco_tau32s,
         ) = metric_inputs
 
-        add_reconstruction_plots(
-            results,
+        histograms = collect_reconstruction_histograms(
+            self.feature_names,
+            x_np,
+            x_hat_np,
+            true_jet_pts,
+            reco_jet_pts,
+            true_jet_masses,
+            reco_jet_masses,
+            true_tau32s,
+            reco_tau32s,
+            data_level=self.data_level,
+        )
+        figures = reconstruction_plots(
             self.feature_names,
             mse_per_feature,
             x_np,
@@ -291,7 +302,11 @@ class PhysicsEvaluator:
             reco_jet_masses,
             true_tau32s,
             reco_tau32s,
+            data_level=self.data_level,
+            histograms=histograms,
         )
+        results.update({f"histograms/{key}": value for key, value in histograms.items()})
+        results.update({f"plots/{key}": value for key, value in figures.items()})
         _profile_eval("eval build reconstruction plots", t0)
 
         return results

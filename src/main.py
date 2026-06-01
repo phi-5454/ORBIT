@@ -27,7 +27,7 @@ from omegaconf import DictConfig, OmegaConf
 
 import wandb
 from .multirun import run_codebook_multirun
-from .plotting import replot_jet_structure
+from .plotting import replot_reconstruction_comparison
 from .train_eval import TrainPipeline
 import datetime
 import uuid
@@ -101,9 +101,10 @@ def main(cfg: DictConfig):
         ]
         runs_data = [_load_npz_dict(path) for path in npz_files]
         _save_figures(
-            replot_jet_structure(
+            replot_reconstruction_comparison(
                 runs_data=runs_data,
                 run_labels=cfg["replot"]["run_labels"],
+                data_level=cfg["data"]["level"],
             ),
             f"{cfg['replot']['in_base_dir']}/combined_plots",
         )
