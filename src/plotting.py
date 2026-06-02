@@ -226,6 +226,8 @@ def collect_reconstruction_histograms(
     reco_jet_masses=(),
     true_tau32s=(),
     reco_tau32s=(),
+    true_missing_ets=(),
+    reco_missing_ets=(),
     data_level="particle",
 ):
     _validate_data_level(data_level)
@@ -277,6 +279,19 @@ def collect_reconstruction_histograms(
     histograms["energy_residuals_counts"], histograms["energy_residuals_bins"] = (
         np.histogram(energy_reco - energy_orig, bins=50, density=True)
     )
+
+    if data_level == "particle" and len(true_missing_ets) > 0:
+        true_missing_ets = np.asarray(true_missing_ets)
+        reco_missing_ets = np.asarray(reco_missing_ets)
+        max_missing_et = max(true_missing_ets.max(), reco_missing_ets.max(), 1e-8)
+        missing_et_bins = np.linspace(0, max_missing_et, 50)
+        histograms["missing_et_orig_counts"] = np.histogram(
+            true_missing_ets, bins=missing_et_bins, density=True
+        )[0]
+        histograms["missing_et_reco_counts"] = np.histogram(
+            reco_missing_ets, bins=missing_et_bins, density=True
+        )[0]
+        histograms["missing_et_bins"] = missing_et_bins
 
     # Tau32 and reconstructed fat-jet mass are available only when clustering particles.
     if data_level == "particle" and len(true_jet_masses) > 0:
@@ -482,6 +497,46 @@ def plot_energy_histograms(
         _adjust_ratio_layout(fig)
     else:
         plt.tight_layout()
+    return fig
+
+
+def plot_missing_transverse_energy(histograms, reconstructed_series=None):
+    """Plot event-level missing transverse energy for particle reconstruction."""
+    single_run = reconstructed_series is None
+    reconstructed_series = reconstructed_series or [
+        (histograms, "Reconstructed", RECONSTRUCTED_COLOR)
+    ]
+    fig, ax = plt.subplots(figsize=RESOLUTION_FIGSIZE)
+    bins = histograms["missing_et_bins"]
+    if single_run:
+        _plot_original_reconstructed_histograms(
+            ax,
+            bins,
+            histograms["missing_et_orig_counts"],
+            histograms["missing_et_reco_counts"],
+        )
+    else:
+        _plot_filled_histogram(
+            ax,
+            bins,
+            histograms["missing_et_orig_counts"],
+            label="Original (Truth)",
+            color=TRUTH_REFERENCE_COLOR,
+            alpha=TRUTH_REFERENCE_FILL_ALPHA,
+        )
+        for data, label, color in reconstructed_series:
+            _plot_single_histogram(
+                ax,
+                bins,
+                data["missing_et_reco_counts"],
+                label=label,
+                color=color,
+            )
+    ax.set_xlabel(r"Missing transverse energy $E_T^\mathrm{miss}$ [GeV]")
+    ax.set_ylabel("Density")
+    _set_title(ax, "Missing Transverse Energy")
+    ax.legend(prop={"size": 10})
+    plt.tight_layout()
     return fig
 
 
@@ -722,6 +777,10 @@ def reconstruction_plots(
         include_ratio=include_all_ratios,
         title=f"{data_level.capitalize()} Energy: Original vs. Reconstructed (m=0)",
     )
+    if data_level == "particle" and "missing_et_bins" in histograms:
+        figures["paper_missing_transverse_energy"] = plot_missing_transverse_energy(
+            histograms
+        )
 
     if data_level == "particle" and "jet_mass_orig_counts" in histograms:
         if include_all_ratios:
@@ -1259,6 +1318,15 @@ def replot_reconstruction_comparison(
         include_ratio=include_all_ratios,
         title=f"{data_level.capitalize()} Energy: Reconstruction Sweeps (m=0)",
     )
+    if data_level == "particle" and all(
+        "missing_et_bins" in data for data in runs_data
+    ):
+        figures["paper_combined_missing_transverse_energy.png"] = (
+            plot_missing_transverse_energy(
+                ref_data,
+                reconstructed_series=reconstructed_series,
+            )
+        )
 
     # ==========================================
     # 4. Jet Substructure (Mass, Mass Diff, Tau32 Diff)

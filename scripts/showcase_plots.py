@@ -158,6 +158,16 @@ def dummy_jets(rng, num_jets, noise_scale):
     return true_pts, reco_pts, true_masses, reco_masses, true_tau32s, reco_tau32s
 
 
+def dummy_missing_transverse_energy(rng, num_events, noise_scale):
+    true_missing_ets = rng.lognormal(mean=3.7, sigma=0.65, size=num_events)
+    reco_missing_ets = np.clip(
+        true_missing_ets + rng.normal(0.0, 5.0 * noise_scale, size=num_events),
+        0.0,
+        None,
+    )
+    return true_missing_ets, reco_missing_ets
+
+
 def reconstruction_results(
     rng,
     num_particles,
@@ -169,11 +179,19 @@ def reconstruction_results(
     if data_level == "particle":
         x, x_hat = dummy_particles(rng, num_particles, noise_scale)
         jets = dummy_jets(rng, num_jets, noise_scale)
+        missing_ets = dummy_missing_transverse_energy(rng, num_jets, noise_scale)
     else:
         x, x_hat = dummy_jet_features(rng, num_jets, noise_scale)
         jets = (x[:, 2], x_hat[:, 2], (), (), (), ())
+        missing_ets = ((), ())
     mse_per_feature = np.mean((x_hat - x) ** 2, axis=0)
-    histograms = histogram_data(x, x_hat, jets, data_level=data_level)
+    histograms = histogram_data(
+        x,
+        x_hat,
+        jets,
+        missing_ets=missing_ets,
+        data_level=data_level,
+    )
     figures = reconstruction_plots(
         FEATURE_NAMES,
         mse_per_feature,
@@ -187,9 +205,15 @@ def reconstruction_results(
     return x, x_hat, mse_per_feature, figures, histograms
 
 
-def histogram_data(x, x_hat, jets, data_level="particle"):
+def histogram_data(x, x_hat, jets, missing_ets=((), ()), data_level="particle"):
     return collect_reconstruction_histograms(
-        FEATURE_NAMES, x, x_hat, *jets, data_level=data_level
+        FEATURE_NAMES,
+        x,
+        x_hat,
+        *jets,
+        true_missing_ets=missing_ets[0],
+        reco_missing_ets=missing_ets[1],
+        data_level=data_level,
     )
 
 

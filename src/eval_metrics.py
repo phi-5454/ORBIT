@@ -231,6 +231,19 @@ class PhysicsEvaluator:
             reco_tau32s,
         )
 
+    def _collect_missing_transverse_energy(self, x_np_tuple, x_hat_np_tuple, mask_np):
+        def missing_transverse_energy(events):
+            pts = np.where(mask_np, events[:, :, 2], 0.0)
+            phis = events[:, :, 1]
+            px = np.sum(pts * np.cos(phis), axis=1)
+            py = np.sum(pts * np.sin(phis), axis=1)
+            return np.hypot(px, py)
+
+        return (
+            missing_transverse_energy(x_np_tuple),
+            missing_transverse_energy(x_hat_np_tuple),
+        )
+
     def evaluate_reconstruction(self, x, x_hat, mask):
         results = {}
         t0 = time.perf_counter()
@@ -279,6 +292,12 @@ class PhysicsEvaluator:
             true_tau32s,
             reco_tau32s,
         ) = metric_inputs
+        if self.data_level == "particle":
+            true_missing_ets, reco_missing_ets = self._collect_missing_transverse_energy(
+                x_np_tuple, x_hat_np_tuple, mask_np
+            )
+        else:
+            true_missing_ets, reco_missing_ets = (), ()
 
         histograms = collect_reconstruction_histograms(
             self.feature_names,
@@ -290,6 +309,8 @@ class PhysicsEvaluator:
             reco_jet_masses,
             true_tau32s,
             reco_tau32s,
+            true_missing_ets=true_missing_ets,
+            reco_missing_ets=reco_missing_ets,
             data_level=self.data_level,
         )
         figures = reconstruction_plots(
