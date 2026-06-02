@@ -249,6 +249,7 @@ class PhysicsEvaluator:
 
         for i, name in enumerate(self.feature_names):
             results[f"metrics/mse_{name.replace(' ', '_')}"] = mse_per_feature[i].item()
+        results["metrics/mse_total"] = mse_per_feature.mean().item()
         t0 = _profile_eval("eval mse", t0)
 
         # Convert to NumPy

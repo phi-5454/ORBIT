@@ -48,11 +48,22 @@ SUBSTRUCTURE_COMPARISON_FIGSIZE = (21, 7)
 ATTENTION_DELTA_FIGSIZE = (6, 5)
 ATTENTION_MAP_FIGSIZE = (5, 4)
 SCATTER_FIGSIZE = (8, 6)
+MONEY_TRIPLET_FIGSIZE = (21, 6)
 RATIO_HEIGHT_RATIOS = (3, 1)
 RATIO_HSPACE = 0.08
 RATIO_WSPACE = 0.25
 RATIO_YLIM = (0.5, 1.5)
 UTILIZATION_YLIM = (0.0, 1.05)
+KINEMATIC_LABELS = {
+    "pT": r"$p_T$",
+    "Eta": r"$\eta$",
+    "Phi": r"$\phi$",
+}
+KINEMATIC_RESIDUAL_LABELS = {
+    "pT": r"$p_T^{reco} - p_T^{orig}$",
+    "Eta": r"$\eta^{reco} - \eta^{orig}$",
+    "Phi": r"$\phi^{reco} - \phi^{orig}$",
+}
 PLOT_TITLES_ENABLED = True
 
 
@@ -245,6 +256,11 @@ def collect_reconstruction_histograms(
             x_hat_np[:, i], bins=bins, density=True
         )[0]
         histograms[f"{clean_name}_bins"] = bins
+        diff_counts, diff_bins = np.histogram(
+            x_hat_np[:, i] - x_np[:, i], bins=50, density=True
+        )
+        histograms[f"{clean_name}_diff_counts"] = diff_counts
+        histograms[f"{clean_name}_diff_bins"] = diff_bins
 
     energy_orig = x_np[:, 2] * np.cosh(x_np[:, 0])
     energy_reco = x_hat_np[:, 2] * np.cosh(x_hat_np[:, 0])
@@ -470,6 +486,136 @@ def plot_energy_histograms(
 
 
 # =============================================================================
+# Paper plots
+# =============================================================================
+
+
+def plot_paper_kinematic_distributions(
+    histograms,
+    data_level,
+    reconstructed_series=None,
+):
+    """Plot the three core kinematic distributions with minimal decoration."""
+    _validate_data_level(data_level)
+    single_run = reconstructed_series is None
+    reconstructed_series = reconstructed_series or [
+        (histograms, "Reconstructed", RECONSTRUCTED_COLOR)
+    ]
+    fig, axes = plt.subplots(1, 3, figsize=MONEY_TRIPLET_FIGSIZE)
+
+    for axis, feature_name in zip(axes, ("pT", "Eta", "Phi")):
+        feature_label = KINEMATIC_LABELS[feature_name]
+        bins = histograms[f"{feature_name}_bins"]
+        original = histograms[f"{feature_name}_orig_counts"]
+        if single_run:
+            _plot_original_reconstructed_histograms(
+                axis,
+                bins,
+                original,
+                histograms[f"{feature_name}_reco_counts"],
+            )
+        else:
+            _plot_filled_histogram(
+                axis,
+                bins,
+                original,
+                label="Original (Truth)",
+                color=TRUTH_REFERENCE_COLOR,
+                alpha=TRUTH_REFERENCE_FILL_ALPHA,
+            )
+            for data, label, color in reconstructed_series:
+                _plot_single_histogram(
+                    axis,
+                    bins,
+                    data[f"{feature_name}_reco_counts"],
+                    label=label,
+                    color=color,
+                )
+        if feature_name == "pT":
+            axis.set_xscale("log")
+        axis.set_xlabel(feature_label)
+        axis.set_ylabel("Density")
+        _set_title(axis, f"{feature_label} distribution")
+        axis.legend(prop={"size": 10})
+
+    _set_suptitle(fig, f"{data_level.capitalize()} kinematics: original vs. reconstructed")
+    plt.tight_layout()
+    return fig
+
+
+def plot_paper_kinematic_differences(
+    histograms,
+    data_level,
+    difference_series=None,
+):
+    """Plot reconstructed-minus-original residuals for the three core features."""
+    _validate_data_level(data_level)
+    difference_series = difference_series or [
+        (histograms, None, RESIDUAL_COLOR)
+    ]
+    fig, axes = plt.subplots(1, 3, figsize=MONEY_TRIPLET_FIGSIZE)
+
+    for axis, feature_name in zip(axes, ("pT", "Eta", "Phi")):
+        feature_label = KINEMATIC_LABELS[feature_name]
+        plot_residual_histogram(
+            axis,
+            histograms[f"{feature_name}_diff_bins"],
+            [
+                (data[f"{feature_name}_diff_counts"], label, color)
+                for data, label, color in difference_series
+            ],
+            xlabel=KINEMATIC_RESIDUAL_LABELS[feature_name],
+            title=f"{feature_label} residuals",
+        )
+
+    _set_suptitle(fig, f"{data_level.capitalize()} kinematic residuals")
+    plt.tight_layout()
+    return fig
+
+
+def paper_reconstruction_plots(histograms, data_level):
+    """Return the core single-run reconstruction figures."""
+    return {
+        "paper_kinematic_distributions": plot_paper_kinematic_distributions(
+            histograms,
+            data_level,
+        ),
+        "paper_kinematic_differences": plot_paper_kinematic_differences(
+            histograms,
+            data_level,
+        ),
+    }
+
+
+def _has_paper_histograms(histograms):
+    return all(
+        f"{feature_name}_{suffix}" in histograms
+        for feature_name in ("pT", "Eta", "Phi")
+        for suffix in ("bins", "orig_counts", "reco_counts", "diff_bins", "diff_counts")
+    )
+
+
+def paper_reconstruction_comparison_plots(runs_data, run_labels, data_level):
+    """Return the core multirun reconstruction figures."""
+    reconstructed_series = [
+        (data, run_labels[i], RUN_COLORS[i % len(RUN_COLORS)])
+        for i, data in enumerate(runs_data)
+    ]
+    return {
+        "paper_combined_kinematic_distributions.png": plot_paper_kinematic_distributions(
+            runs_data[0],
+            data_level,
+            reconstructed_series=reconstructed_series,
+        ),
+        "paper_combined_kinematic_differences.png": plot_paper_kinematic_differences(
+            runs_data[0],
+            data_level,
+            difference_series=reconstructed_series,
+        ),
+    }
+
+
+# =============================================================================
 # Single-run reconstruction plots
 # =============================================================================
 
@@ -544,6 +690,7 @@ def reconstruction_plots(
             data_level=data_level,
         )
     figures = {}
+    figures.update(paper_reconstruction_plots(histograms, data_level))
 
     if "jet_pt_resolution_counts" in histograms:
         fig, ax = plt.subplots(figsize=RESOLUTION_FIGSIZE)
@@ -904,6 +1051,142 @@ def plot_codebook_utilization_scatter(records):
     return figures
 
 
+def plot_theoretical_codebook_bits():
+    """Plot the theoretical relationship between codebook size and bit count."""
+    mh.style.use(mh.style.ROOT)
+
+    bits = np.linspace(0, 45, 181)
+    codebook_sizes = np.exp2(bits)
+    nominal_points = (
+        (37, r"nominal size: 37 bits, $1.37 \times 10^{11}$", "-", CODEBOOK_FAMILY_COLORS["fsq"]),
+        (40, r"nominal size, with PID: 40 bits, $1.10 \times 10^{12}$", "--", CODEBOOK_FAMILY_COLORS["vq_ste"]),
+    )
+
+    fig, ax = plt.subplots(figsize=SCATTER_FIGSIZE)
+    ax.plot(
+        codebook_sizes,
+        bits,
+        color=REFERENCE_LINE_COLOR,
+        linewidth=SCATTER_LINEWIDTH,
+        label=r"$\log_2(\mathrm{codebook\ size})$",
+    )
+    for nominal_bits, label, linestyle, color in nominal_points:
+        nominal_size = 2**nominal_bits
+        ax.plot(
+            nominal_size,
+            nominal_bits,
+            color=color,
+            marker="o",
+            markersize=7,
+            linestyle="none",
+            label=label,
+            zorder=2,
+        )
+        ax.axvline(
+            nominal_size,
+            color=color,
+            linestyle=linestyle,
+            alpha=SCATTER_LINE_ALPHA,
+            linewidth=SCATTER_LINEWIDTH,
+            zorder=1,
+        )
+    ax.set_xscale("log")
+    ax.set_xlim(1, 1e14)
+    ax.set_xticks(
+        [1, 1e2, 1e5, 1e8, 1e11, 1e14],
+        ["1", r"$10^2$", r"$10^5$", r"$10^8$", r"$10^{11}$", r"$10^{14}$"],
+    )
+    ax.set_xlabel("Codebook size")
+    ax.set_ylabel("Required bits")
+    ax.set_ylim(bottom=0)
+    _set_title(ax, "Theoretical codebook size vs. bits")
+    ax.legend(prop={"size": 9})
+    plt.tight_layout()
+    return fig
+
+
+def _record_total_mse(record):
+    total = record.get("metrics/mse_total")
+    if total is not None:
+        return total
+    components = [
+        record.get("metrics/mse_Eta"),
+        record.get("metrics/mse_Phi"),
+        record.get("metrics/mse_pT"),
+    ]
+    if any(value is None for value in components):
+        return None
+    return float(np.mean(components))
+
+
+def _record_total_utilization(record):
+    for metric in (
+        "metrics/utilization_total",
+        "metrics/utilization_combined",
+        "metrics/utilization_mu",
+        "metrics/utilization_alpha",
+    ):
+        value = record.get(metric)
+        if value is not None:
+            return value
+    return None
+
+
+def plot_paper_codebook_scans(records):
+    """Plot the two headline codebook-size scans."""
+    family_colors, family_markers, family_labels = _codebook_family_styles()
+    figures = {}
+
+    mse_records = [
+        record
+        for record in records
+        if record.get("total_codebook_size") is not None
+        and _record_total_mse(record) is not None
+        and _record_total_mse(record) > 0
+    ]
+    if mse_records:
+        figures["paper_codebook_size_vs_mse_total.png"] = plot_scatter_figure(
+            records=mse_records,
+            x_value=lambda record: record["total_codebook_size"],
+            y_value=_record_total_mse,
+            x_label="Total codebook size",
+            y_label="Total MSE",
+            title="Codebook size vs. total MSE",
+            family_fn=_codebook_family,
+            family_colors=family_colors,
+            family_markers=family_markers,
+            family_labels=family_labels,
+            log_x=True,
+            log_y=True,
+        )
+
+    utilization_records = [
+        record
+        for record in records
+        if record.get("total_codebook_size") is not None
+        and _record_total_utilization(record) is not None
+    ]
+    if utilization_records:
+        figures["paper_codebook_size_vs_utilization_total.png"] = plot_scatter_figure(
+            records=utilization_records,
+            x_value=lambda record: record["total_codebook_size"],
+            y_value=_record_total_utilization,
+            x_label="Total codebook size",
+            y_label="Total codebook utilization",
+            title="Codebook size vs. total utilization",
+            family_fn=_codebook_family,
+            family_colors=family_colors,
+            family_markers=family_markers,
+            family_labels=family_labels,
+            log_x=True,
+        )
+        figures["paper_codebook_size_vs_utilization_total.png"].axes[0].set_ylim(
+            *UTILIZATION_YLIM
+        )
+
+    return figures
+
+
 def replot_reconstruction_comparison(
     runs_data,
     run_labels,
@@ -927,6 +1210,10 @@ def replot_reconstruction_comparison(
     # We can extract the bins and the "Original" truth from the very first run
     # (since the test set and bins are constant across all runs)
     ref_data = runs_data[0]
+    if _has_paper_histograms(ref_data):
+        figures.update(
+            paper_reconstruction_comparison_plots(runs_data, run_labels, data_level)
+        )
 
     # ==========================================
     # 1. Jet pT Resolution

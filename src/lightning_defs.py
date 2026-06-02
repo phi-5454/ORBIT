@@ -273,6 +273,9 @@ class PHA_FSQ_VAE(L.LightningModule):
                 target_set.add(tuple(vec))
 
         # 1. Track Mu
+        utilization_mu = None
+        utilization_alpha = None
+        utilization_combined = None
         if self.dim_mu > 0:
             add_unique_codes(z_hat_mu, set_mu)
 
@@ -351,6 +354,11 @@ class PHA_FSQ_VAE(L.LightningModule):
             )
             metrics["metrics/utilization_combined"] = utilization_combined
             set_comb.clear()
+        utilization_total = utilization_combined
+        if utilization_total is None:
+            utilization_total = utilization_mu if utilization_mu is not None else utilization_alpha
+        if utilization_total is not None:
+            metrics["metrics/utilization_total"] = utilization_total
         self._save_metrics(prefix, metrics)
 
     def forward(self, x, mask):

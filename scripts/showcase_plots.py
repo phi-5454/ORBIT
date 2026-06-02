@@ -24,6 +24,8 @@ from src.plotting import (
     exploratory_feature_histograms,
     plot_codebook_error_scatter,
     plot_codebook_utilization_scatter,
+    plot_paper_codebook_scans,
+    plot_theoretical_codebook_bits,
     replot_reconstruction_comparison,
     reconstruction_plots,
     set_plot_titles_enabled,
@@ -43,18 +45,23 @@ def save_figure(fig, output_dir, filename):
 def gallery_sections(filenames):
     sections = (
         (
+            "Paper Plots",
+            lambda filename: "paper_" in filename,
+        ),
+        (
             "Exploratory Reconstruction",
-            lambda filename: "_exploratory_" in filename,
+            lambda filename: "_exploratory_" in filename and "paper_" not in filename,
         ),
         (
             "Single-Run Reconstruction",
             lambda filename: filename.startswith(("particle_", "jet_"))
             and "_combined_" not in filename
-            and "_exploratory_" not in filename,
+            and "_exploratory_" not in filename
+            and "paper_" not in filename,
         ),
         (
             "Multirun Reconstruction",
-            lambda filename: "_combined_" in filename,
+            lambda filename: "_combined_" in filename and "paper_" not in filename,
         ),
         (
             "Attention Diagnostics",
@@ -298,6 +305,12 @@ def save_attention_plots(rng, output_dir):
 
 
 def save_codebook_plots(output_dir):
+    save_figure(
+        plot_theoretical_codebook_bits(),
+        output_dir,
+        "paper_codebook_size_vs_bits_theoretical.png",
+    )
+
     records = []
     families = (
         ("FSQ", 0.85),
@@ -313,7 +326,9 @@ def save_codebook_plots(output_dir):
                     "metrics/mse_Eta": factor * 0.3 / np.sqrt(size),
                     "metrics/mse_Phi": factor * 0.5 / np.sqrt(size),
                     "metrics/mse_pT": factor * 18.0 / np.sqrt(size),
+                    "metrics/mse_total": factor * 6.4 / np.sqrt(size),
                     "metrics/utilization_mu": min(0.95, factor * 16.0 / np.sqrt(size)),
+                    "metrics/utilization_total": min(0.95, factor * 16.0 / np.sqrt(size)),
                 }
             )
 
@@ -324,6 +339,9 @@ def save_codebook_plots(output_dir):
     for filename, fig in figures.items():
         save_figure(fig, output_dir, filename)
     figures = plot_codebook_utilization_scatter(records)
+    for filename, fig in figures.items():
+        save_figure(fig, output_dir, filename)
+    figures = plot_paper_codebook_scans(records)
     for filename, fig in figures.items():
         save_figure(fig, output_dir, filename)
 

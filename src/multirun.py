@@ -15,6 +15,7 @@ import wandb
 from .plotting import (
     plot_codebook_error_scatter,
     plot_codebook_utilization_scatter,
+    plot_paper_codebook_scans,
     replot_reconstruction_comparison,
 )
 from .train_eval import TrainPipeline
@@ -183,6 +184,7 @@ def collect_codebook_multirun(config):
         comparison_dir,
     )
     _save_figures(plot_codebook_utilization_scatter(records), comparison_dir)
+    _save_figures(plot_paper_codebook_scans(records), comparison_dir)
 
     npz_files = [record["hist_path"] for record in records if record.get("hist_path")]
     run_labels = [f"{record['label']}, seed {record['seed']}" for record in records if record.get("hist_path")]
