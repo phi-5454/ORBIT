@@ -373,6 +373,7 @@ class PHA_FSQ_VAE(L.LightningModule):
 
         # 2. Split
         z_mu, z_alpha = self.phi(z_encoded)
+        token_mask = mask.unsqueeze(-1)
 
         # 3. Quantize
         if self.model_cfg["skip_quantization"] == True:
@@ -392,6 +393,8 @@ class PHA_FSQ_VAE(L.LightningModule):
                 loss_mu,
                 loss_alpha,
             ) = self._quantize_latents(z_mu, z_alpha)
+            z_dec_mu = z_dec_mu * token_mask.to(z_dec_mu.dtype)
+            z_dec_alpha = z_dec_alpha * token_mask.to(z_dec_alpha.dtype)
             self._last_quantizer_loss_mu = loss_mu
             self._last_quantizer_loss_alpha = loss_alpha
             z_decoded = self.psi(z_dec_mu, z_dec_alpha)
@@ -411,6 +414,7 @@ class PHA_FSQ_VAE(L.LightningModule):
         )
 
         z_mu, z_alpha = self.phi(z_encoded)
+        token_mask = mask.unsqueeze(-1)
 
         if self.model_cfg["skip_quantization"] == True:
             z_track_mu = z_mu
@@ -429,6 +433,8 @@ class PHA_FSQ_VAE(L.LightningModule):
                 loss_mu,
                 loss_alpha,
             ) = self._quantize_latents(z_mu, z_alpha)
+            z_dec_mu = z_dec_mu * token_mask.to(z_dec_mu.dtype)
+            z_dec_alpha = z_dec_alpha * token_mask.to(z_dec_alpha.dtype)
             self._last_quantizer_loss_mu = loss_mu
             self._last_quantizer_loss_alpha = loss_alpha
             z_decoded = self.psi(z_dec_mu, z_dec_alpha)
